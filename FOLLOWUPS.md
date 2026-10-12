@@ -11,7 +11,14 @@ Each item: where, approach, risk, how to verify.
 2. **The engine log (`dhewm3log.txt`) is written to `~/Library/Application Support/dhewm3`**
    even with a throwaway `fs_savepath`: the path is fixed before cvars are read
    (`neo/sys/osx/DOOMController.mm`). Harmless, but not isolated.
-3. **Intro shots are not exactly repeatable** (up to about 0.1% of pixels between two GL
+3. **The frozen views are occasionally frozen at a different game time.** In one of about
+   ten runs `special_base_hell1/heathaze` showed the lava and flames at another animation
+   phase (3% of pixels) in one renderer; a rerun matched. `g_stopTime` is set a fixed number
+   of rendered frames after the map starts, and frames do not always map to game tics the
+   same way (also the cause of item 4, probably). Approach: stop time from the game side at
+   a fixed `gameLocal.time`, or use render demos (`recordDemo`) for these views as
+   `demoshots_demo1` does. Verify: ten runs of one renderer are identical.
+3a. **Intro shots are not exactly repeatable** (up to about 0.1% of pixels between two GL
    runs): the cinematic is running while the shot is taken.
 
 ## Metal backend

@@ -65,6 +65,15 @@ Verified with the harness on an M5 Max (1280x720, hidden window), commit of 2026
   from the map data): Metal matches OpenGL (at most 0.1% of pixels).
 - `set r_backend opengl; vid_restart` and back to `metal` in one session
   (`switch_base_alphalabs1`): works both ways; the first and third screenshots are identical.
+- Debug views `r_showTris 2`, `r_showLights 2`, `r_showNormals 2`, `r_showShadows 1`,
+  `r_showLightCount 1`, `r_showOverDraw 1` on alphalabs1: Metal matches OpenGL except for
+  line rasterisation in `r_showTris` (1.4% of pixels).
+- CPU cost in the timedemo (`r_metalFrameStats`): 1.4-1.8 ms per frame in total, of which
+  0.4-0.5 ms from the first GL call of a frame to the end of present; no time waiting for
+  the GPU.
+- The OpenGL renderer is unchanged: the current build with `r_backend opengl` against a
+  build of the Phase 0 commit (worktree `../dhewm3-base`) flags no image and has the same
+  timedemo result (189.2 fps both).
 
 Not verified:
 - A visible window (focus, resize, fullscreen, presentation pacing on screen): every run so

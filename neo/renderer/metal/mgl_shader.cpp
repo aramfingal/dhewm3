@@ -133,7 +133,9 @@ void VertexStage( const MglPairKey &key, Builder &b, uint32_t fsReads, std::stri
 		}
 	}
 	body += "\tfloat4 o_pos = float4(0.0, 0.0, 0.0, 1.0);\n"
-			"\tfloat4 o_col0 = float4(1.0);\n"
+			// a vertex program that does not write result.color leaves it undefined; Apple's
+			// OpenGL gives black (r_showShadows relies on nothing better), so do the same
+			"\tfloat4 o_col0 = float4(0.0, 0.0, 0.0, 1.0);\n"
 			"\tfloat4 o_col1 = float4(0.0, 0.0, 0.0, 1.0);\n"
 			"\tfloat4 o_fog = float4(0.0, 0.0, 0.0, 1.0);\n"
 			"\tfloat4 o_psize = float4(1.0);\n";
