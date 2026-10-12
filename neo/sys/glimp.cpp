@@ -54,6 +54,7 @@ If you have questions concerning this license or the applicable additional terms
   extern idCVar r_backend;
   extern idCVar r_metalHidden;
   static SDL_MetalView metalView = NULL;
+  static int metalSamples = 0;
 #endif
 static bool usingMetal = false;
 
@@ -621,7 +622,8 @@ try_again:
 			void *layer = metalView ? SDL_Metal_GetLayer( metalView ) : NULL;
 			int dw = parms.width, dh = parms.height;
 			SDL_Metal_GetDrawableSize( window, &dw, &dh );
-			if ( !layer || !MGL_Init( layer, dw, dh ) ) {
+			metalSamples = layer ? MGL_Init( layer, dw, dh, multisamples ) : 0;
+			if ( metalSamples == 0 ) {
 				common->Warning( "Couldn't initialise Metal: %s", SDL_GetError() );
 				if ( metalView ) {
 					SDL_Metal_DestroyView( metalView );
@@ -825,8 +827,8 @@ try_again:
 				r = g = b = a = 8;
 				d = 24;
 				s = 8;
-				msaa = 0;
-				msaaStr = "no MSAA";
+				msaa = ( metalSamples > 1 ) ? metalSamples : 0;
+				msaaStr = ( msaa > 0 ) ? idStr::Format( "%dx MSAA", msaa ).c_str() : "no MSAA";
 			}
 
 			common->Printf("Got %d stencil bits, %d depth bits, color bits: r%d g%d b%d a%d and %s\n", s, d, r, g, b, a, msaaStr.c_str());
@@ -879,11 +881,8 @@ try_again:
 
 #if SDL_VERSION_ATLEAST(2, 0, 0)
 	// SDL1.2 has no context, and is not supported by ImGui anyway
-	// (the Metal backend does not run Dear ImGui yet: its GL2 backend needs more of GL
-	//  than the Metal layer implements, see FOLLOWUPS.md)
-	if ( !usingMetal ) {
-		D3::ImGuiHooks::Init(window, context);
-	}
+	// (with the Metal backend there is no GL context and context is NULL)
+	D3::ImGuiHooks::Init(window, usingMetal ? NULL : context);
 #endif
 
 	return true;

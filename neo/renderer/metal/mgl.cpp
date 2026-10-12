@@ -153,7 +153,7 @@ struct GLState {
 	float env[2][256][4];
 	TexUnit unit[MGL_MAX_UNITS];
 
-	int packAlignment, unpackAlignment;
+	int packAlignment, unpackAlignment, unpackRowLength;
 	GLenum error;
 };
 
@@ -534,6 +534,17 @@ void UploadLevel( MglTexture *t, int face, int level, int x, int y, int z, int w
 		return;
 	}
 	std::vector<uint8_t> storage;
+	std::vector<uint8_t> packed;
+	if ( gl.unpackRowLength > w && type == GL_UNSIGNED_BYTE ) {
+		// the client's rows are longer than the region (GL_UNPACK_ROW_LENGTH): pack them
+		const size_t srcBpp = (size_t)SourceComponents( format );
+		packed.resize( (size_t)w * (size_t)h * srcBpp );
+		for ( int row = 0; row < h; row++ ) {
+			memcpy( packed.data() + (size_t)row * (size_t)w * srcBpp,
+					(const uint8_t *)pixels + (size_t)row * (size_t)gl.unpackRowLength * srcBpp, (size_t)w * srcBpp );
+		}
+		pixels = packed.data();
+	}
 	int bpp = 4;
 	const uint8_t *data = ConvertPixels( pixels, format, type, w, h, d, t->pixelFormat, t->formatClass, storage, &bpp );
 	if ( !data ) {
@@ -1589,9 +1600,29 @@ void APIENTRY mgl_Finish( void ) { GLMetal_FlushAndWait(); }
 void APIENTRY mgl_PixelStorei( GLenum pname, GLint param ) {
 	if ( pname == GL_PACK_ALIGNMENT ) gl.packAlignment = param;
 	else if ( pname == GL_UNPACK_ALIGNMENT ) gl.unpackAlignment = param;
+	else if ( pname == GL_UNPACK_ROW_LENGTH ) gl.unpackRowLength = param;
 }
-void APIENTRY mgl_PushAttrib( GLbitfield ) {}
-void APIENTRY mgl_PopAttrib( void ) {}
+
+// glPushAttrib / glPopAttrib save and restore the whole state, whatever the mask: the
+// callers (Dear ImGui, debug tools) bracket a block of drawing and want it undone.
+std::vector<GLState> attribStack;
+void APIENTRY mgl_PushAttrib( GLbitfield ) {
+	if ( attribStack.size() < 8 ) {
+		attribStack.push_back( gl );
+	}
+}
+void APIENTRY mgl_PopAttrib( void ) {
+	if ( attribStack.empty() ) {
+		return;
+	}
+	const GLenum error = gl.error;
+	gl = attribStack.back();
+	attribStack.pop_back();
+	gl.error = error;
+	gl.mvpDirty = true;
+	shaderDirty = true;
+	rasterDirty = true;
+}
 
 GLenum APIENTRY mgl_GetError( void ) {
 	const GLenum e = gl.error;
@@ -1627,6 +1658,7 @@ void APIENTRY mgl_GetIntegerv( GLenum pname, GLint *params ) {
 	case GL_DEPTH_BITS: params[0] = 24; break;
 	case GL_MATRIX_MODE: params[0] = (GLint)gl.matrixMode; break;
 	case GL_POLYGON_MODE: params[0] = params[1] = (GLint)gl.polygonMode; break;
+	case GL_SHADE_MODEL: params[0] = GL_SMOOTH; break;
 	default: params[0] = 0; break;
 	}
 }
@@ -2427,10 +2459,10 @@ void ResetState( void ) {
 // interface to sys/glimp.cpp
 // ============================================================================
 
-extern "C" bool MGL_Init( void *caMetalLayer, int width, int height ) {
-	if ( !GLMetal_DeviceInit( caMetalLayer, width, height ) ) {
+extern "C" int MGL_Init( void *caMetalLayer, int width, int height, int multiSamples ) {
+	if ( !GLMetal_DeviceInit( caMetalLayer, width, height, multiSamples ) ) {
 		GLMetal_Shutdown();
-		return false;
+		return 0;
 	}
 	ResetState();
 
@@ -2458,7 +2490,7 @@ extern "C" bool MGL_Init( void *caMetalLayer, int width, int height ) {
 		lib->release();
 	}
 	initialized = true;
-	return true;
+	return GLMetal_SampleCount();
 }
 
 extern "C" void MGL_Shutdown( void ) {

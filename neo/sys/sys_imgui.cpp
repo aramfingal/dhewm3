@@ -168,7 +168,7 @@ static void UpdateWarningOverlay()
 void ShowWarningOverlay( const char* text )
 {
 	if ( !imgui_initialized ) {
-		return;	// no Dear ImGui with the Metal backend yet
+		return;	// Dear ImGui failed to initialise
 	}
 	warningOverlayText = text;
 	warningOverlayStartTime = ImGui::GetTime();
@@ -258,7 +258,15 @@ bool Init(void* _sdlWindow, void* sdlGlContext)
 #endif
 
 	// Setup Platform/Renderer backends
-	if ( ! ImGui_ImplSDLx_InitForOpenGL( sdlWindow, sdlGlContext ) ) {
+#if defined(D3_METAL) && !SDL_VERSION_ATLEAST(3, 0, 0)
+	// the Metal backend has no GL context: the window is a Metal window, and the GL2
+	// renderer backend below draws through qgl, which the Metal backend implements
+	const bool platformOk = ( sdlGlContext == NULL ) ? ImGui_ImplSDL2_InitForMetal( sdlWindow )
+													 : ImGui_ImplSDLx_InitForOpenGL( sdlWindow, sdlGlContext );
+#else
+	const bool platformOk = ImGui_ImplSDLx_InitForOpenGL( sdlWindow, sdlGlContext );
+#endif
+	if ( ! platformOk ) {
 		ImGui::DestroyContext( imguiCtx );
 		imguiCtx = NULL;
 		common->Warning( "Failed to initialize ImGui SDL platform backend!\n" );
@@ -321,7 +329,7 @@ void Shutdown()
 void NewFrame()
 {
 	if ( !imgui_initialized ) {
-		return;	// no Dear ImGui with the Metal backend yet
+		return;	// Dear ImGui failed to initialise
 	}
 	D3P_ScopedCPUSample(Imgui_NewFrame);
 	// it can happen that NewFrame() is called without EndFrame() having been called
@@ -389,7 +397,7 @@ bool keybindModeEnabled = false;
 bool ProcessEvent(const void* sdlEvent)
 {
 	if ( !imgui_initialized ) {
-		return false;	// no Dear ImGui with the Metal backend yet
+		return false;	// Dear ImGui failed to initialise
 	}
 	if (openImguiWindows == 0)
 		return false;
@@ -474,7 +482,7 @@ void SetKeyBindMode( bool enable )
 bool ShouldShowCursor()
 {
 	if ( !imgui_initialized ) {
-		return false;	// no Dear ImGui with the Metal backend yet
+		return false;	// Dear ImGui failed to initialise
 	}
 	if ( sessLocal.GetActiveMenu() == nullptr ) {
 		// when ingame, render the ImGui/SDL/system cursor if an ImGui window is open
@@ -534,7 +542,7 @@ bool ShouldShowCursor()
 void EndFrame()
 {
 	if ( !imgui_initialized ) {
-		return;	// no Dear ImGui with the Metal backend yet
+		return;	// Dear ImGui failed to initialise
 	}
 	if (openImguiWindows == 0 && !haveNewFrame)
 		return;
@@ -590,7 +598,7 @@ void EndFrame()
 void OpenWindow( D3ImGuiWindow win )
 {
 	if ( !imgui_initialized ) {
-		return;	// no Dear ImGui with the Metal backend yet
+		return;	// Dear ImGui failed to initialise
 	}
 	if ( openImguiWindows & win )
 		return; // already open

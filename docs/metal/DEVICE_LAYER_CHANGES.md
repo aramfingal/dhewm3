@@ -59,6 +59,10 @@ depth clamp, the pipeline self test, ray tracing hooks (`tr_metal_rt.h`), static
 - `GLMetal_EncoderGeneration`: lets the caller notice that a new encoder has lost its state.
 - `GLMetal_SetFillMode`, `GLMetal_ReleaseTexture`, `GLMetal_ReleaseBuffer` (they also clear the bind filter).
 - `GLMetal_Resize`.
+- Multisampling: `GLMetal_DeviceInit( ..., samples )` renders into multisampled colour and
+  depth/stencil textures and resolves into the single-sample scene textures every time the
+  pass ends (`StoreActionStoreAndMultisampleResolve`), so copies, readback and present are
+  unchanged. The sample count is part of every pipeline.
 
 ## For a shared library
 

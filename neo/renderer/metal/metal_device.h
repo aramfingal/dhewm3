@@ -18,7 +18,9 @@ kept, what changed and why, so the two can later become one shared library.
 // ---- device and frame lifecycle -------------------------------------------------------
 
 // layerPtr is a CAMetalLayer*
-bool GLMetal_DeviceInit( void *layerPtr, int w, int h );
+// `samples`: requested samples per pixel (0 or 1: no multisampling)
+bool GLMetal_DeviceInit( void *layerPtr, int w, int h, int samples );
+int GLMetal_SampleCount( void );
 void GLMetal_Shutdown( void );
 void GLMetal_Resize( int w, int h );
 

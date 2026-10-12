@@ -377,6 +377,12 @@ def menu_cfg():
                       "screenshot shots/menu1.tga", "wait 3", "quit"]) + "\n"
 
 
+def settings_cfg():
+    """The dhewm3 settings menu (Dear ImGui) over the main menu."""
+    return "\n".join(["wait 60", "disconnect", "wait 120", "dhewm3Settings", "wait 60",
+                      "screenshot shots/settings.tga", "wait 3", "quit"]) + "\n"
+
+
 def restart_cfg(mapname):
     """vid_restart with a map loaded: every image and program is purged and reloaded."""
     return "\n".join(["map %s" % mapname, "wait 90", "screenshot shots/before.tga", "wait 3",
@@ -421,6 +427,8 @@ def build_scenarios(args, renderer):
                  "cvars": {"com_fixedTic": "-1",
                            "com_demoShotFrames": " ".join(str(f) for f in DEMO_SHOT_FRAMES)}})
     if args.suite == "full":
+        scen.append({"name": "settings_menu", "game": "base", "cfg": settings_cfg(),
+                     "shots": ["settings"], "diff": True, "cvars": {}})
         scen.append({"name": "restart_base_alphalabs1", "game": "base",
                      "cfg": restart_cfg("game/alphalabs1"), "shots": ["before", "after"],
                      "diff": False, "cvars": {"com_fixedTic": "1"}})

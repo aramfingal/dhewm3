@@ -57,6 +57,11 @@ Verified with the harness on an M5 Max (1280x720, hidden window), commit of 2026
   the timedemo run and present (about 118 fps on a 120 Hz display).
 - `r_gamma 1.6`, `r_brightness 1.4`: Metal matches OpenGL as closely as with the defaults.
 
+- Dear ImGui (the dhewm3 settings menu, `dhewm3Settings`): the `settings_menu` scenario
+  draws it over the main menu; Metal and OpenGL screenshots match.
+- `r_multiSamples 4`: Metal renders into multisampled targets and resolves; against
+  OpenGL at 4x the demo frames differ in at most 0.06% of pixels. Validation clean at 4x.
+
 Not verified:
 - A visible window (focus, resize, fullscreen, presentation pacing on screen): every run so
   far kept the window hidden so the Mac stayed usable.
@@ -65,5 +70,5 @@ Not verified:
 
 ## Next
 
-- FOLLOWUPS.md, in order: Dear ImGui under Metal, a harness scenario for subviews and
-  post-process materials, the erebus1 offset, MSAA, per-draw CPU cost.
+- FOLLOWUPS.md: a visible-window test, a harness scenario for subviews and post-process
+  materials, per-draw CPU cost, shader pair compilation at start-up.

@@ -18,7 +18,8 @@ int		MetalHost_CvarInt( const char *name );
 float	MetalHost_CvarFloat( const char *name );
 
 // what glimp.cpp calls (declared again in sys/glimp.cpp)
-bool	MGL_Init( void *caMetalLayer, int width, int height );
+// returns the samples per pixel in use (>= 1), or 0 on failure
+int		MGL_Init( void *caMetalLayer, int width, int height, int multiSamples );
 void	MGL_Shutdown( void );
 void	MGL_SwapBuffers( void );
 void	MGL_Resize( int width, int height );

@@ -47,6 +47,11 @@ static const MTL::PixelFormat      s_depthPixelFormat = MTL::PixelFormatDepth32F
 // The scene is rendered into these and copied (flipped) to the drawable when presenting.
 static MTL::Texture               *s_sceneColor = nullptr;
 static MTL::Texture               *s_sceneDepth = nullptr;
+// With multisampling the pass renders into these and resolves into the two above whenever
+// it ends, so copies, readback and present always see single-sample textures.
+static MTL::Texture               *s_msaaColor = nullptr;
+static MTL::Texture               *s_msaaDepth = nullptr;
+static int                         s_sampleCount = 1;
 static int                         s_width = 0;
 static int                         s_height = 0;
 
@@ -690,6 +695,7 @@ MTL::RenderPipelineState *GLMetal_GetPipeline( int programId, const MetalVertexL
 	colorAttachment->setPixelFormat( s_colorPixelFormat );
 	pipelineDesc->setDepthAttachmentPixelFormat( s_depthPixelFormat );
 	pipelineDesc->setStencilAttachmentPixelFormat( s_depthPixelFormat );
+	pipelineDesc->setRasterSampleCount( (NS::UInteger)s_sampleCount );
 	ConfigureBlendState( colorAttachment, blendKey );
 
 	NS::Error *error = nullptr;
@@ -755,6 +761,20 @@ MTL::SamplerState *GLMetal_GetSampler( const MetalSamplerKey &k ) {
 	}
 	s_samplerCache.emplace( key, sampler );
 	return sampler;
+}
+
+static MTL::Texture *GLMetal_NewMultisampleTarget( MTL::PixelFormat format, int width, int height, int samples ) {
+	MTL::TextureDescriptor *desc = MTL::TextureDescriptor::alloc()->init();
+	desc->setTextureType( MTL::TextureType2DMultisample );
+	desc->setPixelFormat( format );
+	desc->setWidth( (NS::UInteger)width );
+	desc->setHeight( (NS::UInteger)height );
+	desc->setSampleCount( (NS::UInteger)samples );
+	desc->setUsage( MTL::TextureUsageRenderTarget );
+	desc->setStorageMode( MTL::StorageModePrivate );
+	MTL::Texture *texture = s_device->newTexture( desc );
+	desc->release();
+	return texture;
 }
 
 MTL::Texture *GLMetal_NewTexture( MTL::TextureType type, MTL::PixelFormat format, int width, int height, int depth,
@@ -1066,6 +1086,22 @@ static bool GLMetal_EnsureSceneTargets( int width, int height ) {
 		s_sceneDepth->release();
 		s_sceneDepth = nullptr;
 	}
+	if ( s_msaaColor ) {
+		s_msaaColor->release();
+		s_msaaColor = nullptr;
+	}
+	if ( s_msaaDepth ) {
+		s_msaaDepth->release();
+		s_msaaDepth = nullptr;
+	}
+	if ( s_sampleCount > 1 ) {
+		s_msaaColor = GLMetal_NewMultisampleTarget( s_colorPixelFormat, width, height, s_sampleCount );
+		s_msaaDepth = GLMetal_NewMultisampleTarget( s_depthPixelFormat, width, height, s_sampleCount );
+		if ( !s_msaaColor || !s_msaaDepth ) {
+			MetalHost_Warning( "[Metal] failed to create %dx multisample targets", s_sampleCount );
+			return false;
+		}
+	}
 	s_sceneColor = GLMetal_NewTexture( MTL::TextureType2D, s_colorPixelFormat, width, height, 1, 1, true, 0 );
 	s_sceneDepth = GLMetal_NewTexture( MTL::TextureType2D, s_depthPixelFormat, width, height, 1, 1, true, 0 );
 	s_width = width;
@@ -1086,18 +1122,28 @@ static bool GLMetal_EnsureEncoder( void ) {
 	// the first pass of a frame clears; a pass reopened after a blit loads what is there
 	const MTL::LoadAction load = s_frameCleared ? MTL::LoadActionLoad : MTL::LoadActionClear;
 	MTL::RenderPassDescriptor *desc = MTL::RenderPassDescriptor::renderPassDescriptor();
-	desc->colorAttachments()->object( 0 )->setTexture( s_sceneColor );
+	const bool msaa = ( s_sampleCount > 1 );
+	const MTL::StoreAction store = msaa ? MTL::StoreActionStoreAndMultisampleResolve : MTL::StoreActionStore;
+	desc->colorAttachments()->object( 0 )->setTexture( msaa ? s_msaaColor : s_sceneColor );
 	desc->colorAttachments()->object( 0 )->setLoadAction( load );
 	desc->colorAttachments()->object( 0 )->setClearColor( MTL::ClearColor::Make( 0.0, 0.0, 0.0, 1.0 ) );
-	desc->colorAttachments()->object( 0 )->setStoreAction( MTL::StoreActionStore );
-	desc->depthAttachment()->setTexture( s_sceneDepth );
+	desc->colorAttachments()->object( 0 )->setStoreAction( store );
+	desc->depthAttachment()->setTexture( msaa ? s_msaaDepth : s_sceneDepth );
 	desc->depthAttachment()->setLoadAction( load );
 	desc->depthAttachment()->setClearDepth( 1.0 );
-	desc->depthAttachment()->setStoreAction( MTL::StoreActionStore );
-	desc->stencilAttachment()->setTexture( s_sceneDepth );
+	desc->depthAttachment()->setStoreAction( store );
+	desc->stencilAttachment()->setTexture( msaa ? s_msaaDepth : s_sceneDepth );
 	desc->stencilAttachment()->setLoadAction( load );
 	desc->stencilAttachment()->setClearStencil( 0 );
-	desc->stencilAttachment()->setStoreAction( MTL::StoreActionStore );
+	desc->stencilAttachment()->setStoreAction( store );
+	if ( msaa ) {
+		// the single-sample textures are what copies, readback and present use
+		desc->colorAttachments()->object( 0 )->setResolveTexture( s_sceneColor );
+		desc->depthAttachment()->setResolveTexture( s_sceneDepth );
+		desc->depthAttachment()->setDepthResolveFilter( MTL::MultisampleDepthResolveFilterSample0 );
+		desc->stencilAttachment()->setResolveTexture( s_sceneDepth );
+		desc->stencilAttachment()->setStencilResolveFilter( MTL::MultisampleStencilResolveFilterSample0 );
+	}
 
 	s_encoder = s_cmdBuffer->renderCommandEncoder( desc );
 	if ( !s_encoder ) {
@@ -1312,11 +1358,21 @@ static bool GLMetal_CreatePresentPipeline( void ) {
 	return s_presentSampler != nullptr;
 }
 
-bool GLMetal_DeviceInit( void *layerPtr, int w, int h ) {
+int GLMetal_SampleCount( void ) { return s_sampleCount; }
+
+bool GLMetal_DeviceInit( void *layerPtr, int w, int h, int samples ) {
 	s_device = MTL::CreateSystemDefaultDevice();
 	if ( !s_device ) {
 		MetalHost_Warning( "[Metal] MTL::CreateSystemDefaultDevice() failed" );
 		return false;
+	}
+	// the highest supported sample count that does not exceed the request
+	s_sampleCount = 1;
+	for ( int n = std::min( samples, 8 ); n > 1; n-- ) {
+		if ( s_device->supportsTextureSampleCount( (NS::UInteger)n ) ) {
+			s_sampleCount = n;
+			break;
+		}
 	}
 	s_layer = reinterpret_cast<CA::MetalLayer *>( layerPtr );
 	s_layer->setDevice( s_device );
@@ -1346,7 +1402,7 @@ bool GLMetal_DeviceInit( void *layerPtr, int w, int h ) {
 	s_want.fillMode = MTL::TriangleFillModeFill;
 
 	MetalHost_Printf( "[Metal] device: %s\n", s_device->name()->utf8String() );
-	MetalHost_Printf( "[Metal] drawable size: %dx%d\n", w, h );
+	MetalHost_Printf( "[Metal] drawable size: %dx%d, %d sample(s) per pixel\n", w, h, s_sampleCount );
 
 	if ( !GLMetal_EnsureSceneTargets( w, h ) || !GLMetal_CreatePresentPipeline() ) {
 		return false;
@@ -1527,6 +1583,8 @@ void GLMetal_Shutdown( void ) {
 	if ( s_presentSampler ) { s_presentSampler->release(); s_presentSampler = nullptr; }
 	if ( s_captureTexture ) { s_captureTexture->release(); s_captureTexture = nullptr; }
 	if ( s_captureBuffer ) { s_captureBuffer->release(); s_captureBuffer = nullptr; s_captureBufferSize = 0; }
+	if ( s_msaaColor ) { s_msaaColor->release(); s_msaaColor = nullptr; }
+	if ( s_msaaDepth ) { s_msaaDepth->release(); s_msaaDepth = nullptr; }
 	if ( s_sceneColor ) { s_sceneColor->release(); s_sceneColor = nullptr; }
 	if ( s_sceneDepth ) { s_sceneDepth->release(); s_sceneDepth = nullptr; }
 	s_width = s_height = 0;
