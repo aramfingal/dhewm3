@@ -53,4 +53,26 @@ code) are in `build/`. Run it with
 
 ## Architecture
 
-See `docs/metal/` (GL call inventory, backend seam, Metal backend design) as it is written.
+The Metal backend is selected with `+set r_backend metal` (default `opengl`; read when the
+renderer starts). dhewm3 calls OpenGL only through `qgl*` function pointers filled by name
+in `GLimp_ExtensionPointer` (`neo/sys/glimp.cpp`); with `r_backend metal` they point into
+`neo/renderer/metal/`:
+
+- `mgl.cpp`: the GL entry points dhewm3 uses, implemented on Metal (state, textures,
+  buffers, draws, readback). `MGL_GetProcAddress` is the name lookup.
+- `mgl_shader.cpp`: generates the MSL of a vertex/fragment pair; fixed-function stages.
+- `mgl_arb.cpp`: translates ARB vertex/fragment program assembly to MSL.
+- `metal_device.cpp`: device layer from the ioq3 Metal renderer (frame pacing, caches).
+- `metal_host.cpp`: the only Metal file that includes engine headers (cvars, printing).
+  The others are C++17 with metal-cpp (`neo/libs/metal-cpp`).
+
+The renderer front end and back end (`draw_common.cpp`, `draw_arb2.cpp`, ...) are shared
+and unchanged, so a rendering difference between the backends is a bug in
+`neo/renderer/metal/`. Read `docs/metal/DESIGN.md` first; `GL_INVENTORY.md` lists the GL
+call sites and `DEVICE_LAYER_CHANGES.md` the differences from the ioq3 device layer.
+
+Debugging: `r_metalDebug 1` prints every shader pair compiled, `2` also writes its MSL to
+`/tmp/mgl_pair_*.metal` (compile one with
+`xcrun -sdk macosx metal -std=metal3.0 -c file.metal -o /dev/null`). A pair that fails to
+compile is written to `/tmp/mgl_failed_*.metal` and draws nothing. `r_metalFrameStats N`
+prints frame timing. Cvars: `r_metalHidden`, `r_metalNoPresent`, `r_metalPresentHz`.

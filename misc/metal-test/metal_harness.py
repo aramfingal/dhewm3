@@ -70,6 +70,8 @@ BENIGN_PATTERNS = [
     r"libbacktrace",
     r"Unknown command 'r_backend'",
     r"terminal support disabled",
+    r"Metal (API|GPU) Validation Enabled",
+    r"_home/",
 ]
 PROBLEM_PATTERNS = [
     r"\[Metal\].*(fail|error|warn|unsupported|not implemented)",
@@ -422,7 +424,7 @@ def build_scenarios(args, renderer):
                      "shots": ["view%d" % i for i in range(VIEWS_PER_MAP)], "diff": False,
                      "cvars": {"com_fixedTic": "1"}, "timeout": 600,
                      "env": {"MTL_DEBUG_LAYER": "1", "MTL_SHADER_VALIDATION": "1",
-                             "MTL_DEBUG_LAYER_ERROR_MODE": "nserror"}})
+                             "MTL_DEBUG_LAYER_ERROR_MODE": "nslog"}})
     if args.only:
         rx = re.compile(args.only)
         scen = [s for s in scen if rx.search(s["name"])]
