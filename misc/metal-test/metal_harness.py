@@ -64,6 +64,7 @@ TIMEDEMO_REGRESSION_PCT = 5.0  # fps drop that flags a performance regression
 # Console lines that are expected noise and never count as renderer problems.
 BENIGN_PATTERNS = [
     r"Couldn't load gui",
+    r"Couldn't load image",          # missing in the game data, the same with OpenGL
     r"WARNING: .*\.(map|proc|script|def|mtr|gui|af|skin|sndshd|fx|pda|md5\w*|lwo|ase|wav|ogg)\b",
     r"WARNING: (idCollisionModelManagerLocal|idSoundCache|idAFEntity|idAnimator|idDeclManager)",
     r"missing or invalid sound|no sound system|Sound",
@@ -383,6 +384,15 @@ def restart_cfg(mapname):
                       "quit"]) + "\n"
 
 
+DEMO_SHOT_FRAMES = [150, 300, 400, 520, 650, 780, 900, 1020, 1150, 1280, 1400, 1520, 1650, 1780, 1900, 2050]
+
+
+def demoshots_cfg(demo):
+    """Screenshots at fixed frames of a render demo (com_demoShotFrames, a cvar of this
+    fork). A demo replays recorded scenes, so every build and renderer draws the same."""
+    return "timeDemoQuit %s\n" % demo
+
+
 def timedemo_cfg(demo):
     return "timeDemoQuit %s\n" % demo
 
@@ -406,6 +416,10 @@ def build_scenarios(args, renderer):
                          "cfg": intro_cfg(mapname),
                          "shots": ["intro%d" % i for i in range(len(INTRO_SHOT_TICS))],
                          "diff": True, "cvars": {"com_fixedTic": "1"}})
+    scen.append({"name": "demoshots_demo1", "game": "base", "cfg": demoshots_cfg("demo1"),
+                 "shots": ["demo_%05d" % f for f in DEMO_SHOT_FRAMES], "diff": True,
+                 "cvars": {"com_fixedTic": "-1",
+                           "com_demoShotFrames": " ".join(str(f) for f in DEMO_SHOT_FRAMES)}})
     if args.suite == "full":
         scen.append({"name": "restart_base_alphalabs1", "game": "base",
                      "cfg": restart_cfg("game/alphalabs1"), "shots": ["before", "after"],

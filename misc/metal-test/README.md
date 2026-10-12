@@ -34,6 +34,7 @@ two result folders (`--strict` treats flagged images as failures).
 |---|---|
 | `menu` | the main menu draws (GUI path, cinematic background); two screenshots |
 | `views_<game>_<map>` | six fixed views per map, compared across renderers and builds |
+| `demoshots_demo1` | `timeDemo demo1` with screenshots at 16 fixed demo frames (`com_demoShotFrames`). A render demo replays recorded scenes, so this is the strictest comparison: two OpenGL runs are bit-identical |
 | `intro_base_mars_city1` | (full suite) the opening cinematic at four fixed tics |
 | `restart_base_alphalabs1` | (full suite) `vid_restart` with a map loaded; screenshot before and after |
 | `timedemo_demo1_rN` | `timeDemoQuit demo1`, fps (2 runs quick, 3 full) |

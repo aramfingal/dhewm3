@@ -22,12 +22,13 @@ Each item: where, approach, risk, how to verify.
    `glPushAttrib`/`glPopAttrib` (now no-ops in `mgl.cpp`), `glGetIntegerv` for the state it
    saves, 16 bit indices (done) and scissor in window coordinates. Or use ImGui's Metal
    backend (Objective-C++). Risk: low. Verify: open the menu (F10) in a visible window.
-5. **d3xp erebus1: uniform offset of about 3/255 against OpenGL** over the whole frame
-   (`metal-test-out/diffs/gl__views_d3xp_erebus1__view*.png`, mean diff 3.0, max 4 away from
-   the weapon). Probably one full-screen blended pass (fog or a post-process material) that
-   rounds differently. Approach: `r_skipPostProcess`, `r_skipFogLights`, `r_skipBlendLights`
-   one at a time in both renderers to find the pass, then compare its blend and texture
-   format. Risk: low. Verify: the erebus1 views drop to the level of the other maps.
+5. **d3xp erebus1 views are not repeatable** (harness, not renderer): the whole frame is
+   about 3/255 darker in some runs. Three Metal runs gave mean brightness 73.31, 76.31 and
+   73.31; OpenGL gave 76.31 every time, and a Metal run that lands on 76.31 is bit-identical
+   to OpenGL. Something in that level depends on wall-clock time (probably a GUI overlay,
+   which uses real time, not game time). Approach: find it with `g_showHud 0` and by
+   disabling GUIs, or drop the level from the image comparison; `demoshots_demo1` is the
+   exact comparison. Verify: three runs of one renderer match.
 6. **No MSAA.** `r_multiSamples` is ignored with Metal (the scene target is single sample).
    Approach: multisample colour and depth attachments in `GLMetal_EnsureSceneTargets` with a
    resolve before copies, readback and present; sample count in the pipeline key. Risk:

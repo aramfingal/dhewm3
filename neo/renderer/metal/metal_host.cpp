@@ -21,6 +21,9 @@ idCVar r_metalHidden( "r_metalHidden", "0", CVAR_RENDERER | CVAR_BOOL | CVAR_INI
 idCVar r_metalDebug( "r_metalDebug", "0", CVAR_RENDERER | CVAR_INTEGER,
 	"Metal backend debugging: 1 = print every shader pair that is compiled, 2 = also dump generated MSL to the savepath" );
 
+idCVar r_metalSkipPair( "r_metalSkipPair", "-1", CVAR_RENDERER | CVAR_INTEGER,
+	"Metal backend debugging: do not draw with shader pair N (numbers as printed by r_metalDebug 1)" );
+
 extern "C" void MetalHost_Printf( const char *fmt, ... ) {
 	va_list argptr;
 	va_start( argptr, fmt );

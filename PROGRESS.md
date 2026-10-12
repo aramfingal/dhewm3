@@ -43,7 +43,12 @@ Verified with the harness on an M5 Max (1280x720, hidden window), commit of 2026
   alphalabs1, delta2a, hell1, d3xp erebus1, d3xp hell), `vid_restart`, three timedemos.
 - Metal against OpenGL: no image flagged (threshold 0.5% of pixels). Largest difference
   0.42% (alphalabs1 view5, the same view that varies most between two OpenGL runs).
-  d3xp erebus1 shows a uniform offset of about 3/255 over the whole image (see FOLLOWUPS).
+  d3xp erebus1 varies by about 3/255 from run to run in either renderer's harness run
+  (wall-clock dependent content, see FOLLOWUPS).
+- `demoshots_demo1` (16 frames of `timeDemo demo1`, exact scenes; two OpenGL runs are
+  bit-identical): Metal differs from OpenGL in at most 0.001% of pixels per frame (mean
+  difference at most 0.03 of 255). This scenario found two real bugs, both fixed: vertex
+  colours and the texture environment colour were not clamped to [0,1] (glow materials).
 - Metal API validation and shader validation (`MTL_DEBUG_LAYER=1`,
   `MTL_SHADER_VALIDATION=1`) on alphalabs1: no messages.
 - `timeDemo demo1`: Metal 652-683 fps, OpenGL 204 fps. Metal does not present in a hidden

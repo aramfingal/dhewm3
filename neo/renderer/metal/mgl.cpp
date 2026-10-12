@@ -176,6 +176,7 @@ bool shaderDirty = true;
 int currentPair = -1;
 bool rasterDirty = true;
 
+int debugSkipPair = -1;				// r_metalSkipPair, read once per frame
 MglTexture *fallbackTexture[4];		// by MT_*
 int clearProgram = -1;
 
@@ -1160,7 +1161,7 @@ MTL::RenderCommandEncoder *PrepareDraw( int vertexCount ) {
 		shaderDirty = false;
 	}
 	const MglPair &pair = pairs[currentPair];
-	if ( pair.programId < 0 ) {
+	if ( pair.programId < 0 || currentPair == debugSkipPair ) {
 		return NULL;
 	}
 	MTL::RenderCommandEncoder *enc = GLMetal_CurrentRenderEncoder();
@@ -2070,7 +2071,10 @@ void APIENTRY mgl_TexEnvi( GLenum target, GLenum pname, GLint v ) {
 void APIENTRY mgl_TexEnvf( GLenum target, GLenum pname, GLfloat v ) { mgl_TexEnvi( target, pname, (GLint)v ); }
 void APIENTRY mgl_TexEnvfv( GLenum target, GLenum pname, const GLfloat *v ) {
 	if ( target == GL_TEXTURE_ENV && pname == GL_TEXTURE_ENV_COLOR ) {
-		memcpy( gl.unit[gl.activeTexture].envColor, v, 4 * sizeof( float ) );
+		// OpenGL clamps the environment colour to [0,1] when it is set
+		for ( int i = 0; i < 4; i++ ) {
+			gl.unit[gl.activeTexture].envColor[i] = std::max( 0.0f, std::min( 1.0f, v[i] ) );
+		}
 	} else {
 		mgl_TexEnvi( target, pname, (GLint)v[0] );
 	}
@@ -2491,6 +2495,7 @@ extern "C" void MGL_Shutdown( void ) {
 extern "C" void MGL_SwapBuffers( void ) {
 	if ( initialized ) {
 		GLMetal_Present();
+		debugSkipPair = MetalHost_CvarInt( "r_metalSkipPair" );
 	}
 }
 

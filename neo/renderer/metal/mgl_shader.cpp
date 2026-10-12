@@ -218,8 +218,10 @@ void VertexStage( const MglPairKey &key, Builder &b, uint32_t fsReads, std::stri
 
 	// GL clip space to Metal's; the image is rendered upside down (docs/metal/DESIGN.md)
 	body += "\tV2F o;\n\to.position = float4( o_pos.x, -o_pos.y, ( o_pos.z + o_pos.w ) * 0.5, o_pos.w );\n";
-	if ( fsReads & MV_COLOR0 ) body += "\to.col0 = o_col0;\n";
-	if ( fsReads & MV_COLOR1 ) body += "\to.col1 = o_col1;\n";
+	// OpenGL clamps vertex colours to [0,1] before they are interpolated, whether they come
+	// from the fixed-function pipeline or a vertex program (materials do use colours above 1)
+	if ( fsReads & MV_COLOR0 ) body += "\to.col0 = saturate( o_col0 );\n";
+	if ( fsReads & MV_COLOR1 ) body += "\to.col1 = saturate( o_col1 );\n";
 	if ( fsReads & MV_FOG ) body += "\to.fog = o_fog;\n";
 	for ( int i = 0; i < 8; i++ ) {
 		if ( fsReads & ( MV_TEXCOORD0 << i ) ) body += "\to.tc" + Num( i ) + " = o_tc" + Num( i ) + ";\n";

@@ -48,6 +48,7 @@ If you have questions concerning this license or the applicable additional terms
 idCVar	idSessionLocal::com_showAngles( "com_showAngles", "0", CVAR_SYSTEM | CVAR_BOOL, "" );
 idCVar	idSessionLocal::com_minTics( "com_minTics", "1", CVAR_SYSTEM, "" );
 idCVar	idSessionLocal::com_showTics( "com_showTics", "0", CVAR_SYSTEM | CVAR_BOOL, "" );
+static idCVar com_demoShotFrames( "com_demoShotFrames", "", CVAR_SYSTEM, "space separated render demo frame numbers; when one is reached a screenshot is written to shots/demo_<frame>.tga" );
 idCVar	idSessionLocal::com_fixedTic( "com_fixedTic", "0", CVAR_SYSTEM | CVAR_INTEGER | CVAR_ARCHIVE, "", -1, 10 );
 idCVar	idSessionLocal::com_showDemo( "com_showDemo", "0", CVAR_SYSTEM | CVAR_BOOL, "" );
 idCVar	idSessionLocal::com_skipGameDraw( "com_skipGameDraw", "0", CVAR_SYSTEM | CVAR_BOOL, "" );
@@ -2417,6 +2418,14 @@ void idSessionLocal::AdvanceRenderDemo( bool singleFrameOnly ) {
 				// a view is ready to render
 				skipFrames--;
 				numDemoFrames++;
+				// test runs (misc/metal-test): screenshots of exact demo frames
+				const char *shotFrames = com_demoShotFrames.GetString();
+				if ( shotFrames[0] ) {
+					idStr list = va( " %s ", shotFrames );
+					if ( list.Find( va( " %i ", numDemoFrames ) ) != -1 ) {
+						cmdSystem->BufferCommandText( CMD_EXEC_APPEND, va( "screenshot shots/demo_%05i.tga\n", numDemoFrames ) );
+					}
+				}
 			}
 			continue;
 		}

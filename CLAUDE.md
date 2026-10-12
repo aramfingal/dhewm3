@@ -48,6 +48,8 @@ code) are in `build/`. Run it with
   during a cinematic. The harness uses it to reach a playable view.
 - `com_fixedTic -1` no longer waits for the next 60 Hz tic at the end of a frame
   (`neo/framework/Common.cpp`), so `timeDemo` measures the renderer instead of the tic rate.
+- `com_demoShotFrames "150 400 ..."`: while a render demo plays, writes
+  `shots/demo_<frame>.tga` at exactly those demo frames (`neo/framework/Session.cpp`).
 - `SDL_MAC_BACKGROUND_APP` handling (above).
 - arm64 macOS deployment target raised from 10.7 to 11.0 (`neo/CMakeLists.txt`).
 
