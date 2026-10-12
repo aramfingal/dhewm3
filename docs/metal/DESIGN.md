@@ -9,7 +9,8 @@ dhewm3 never calls OpenGL directly. Every call goes through a `qgl*` function po
 also in `glimp.cpp`.
 
 That table is the renderer backend seam. `r_backend` (`opengl`, the default, or `metal`; read
-when the renderer starts, so changing it needs `vid_restart`) selects what fills it:
+when the renderer starts: `+set r_backend metal` on the command line, or change it and
+`vid_restart`, which recreates the window) selects what fills it:
 
 | | `r_backend opengl` | `r_backend metal` |
 |---|---|---|

@@ -42,7 +42,8 @@ Each item: where, approach, risk, how to verify.
    then skips it).
 9. **Compressed internal formats with uncompressed data** (`image_useCompression`) are
    stored as RGBA8: Metal cannot compress at upload. More memory than OpenGL in that mode.
-10. **No harness scenario for subviews** (mirrors, remote camera GUIs), heat haze and the
-    d3xp post-process programs, or `r_show*` debug views. Approach: find fixed positions in
-    front of a mirror (mars_city1 bathroom) and a heat-haze emitter and add a `views` list
-    with explicit coordinates to `metal_harness.py`.
+10. **No harness scenario for** remote camera GUIs, the d3xp post-process materials
+    (blood orb, enviro suit, `motionBlur.vfp`) or the `r_show*` debug views. The programs
+    translate; whether they look right is unverified. Approach: a d3xp view with the
+    artifact active (needs `give` and `impulse` commands in the script), and one view per
+    `r_show*` cvar compared against OpenGL.

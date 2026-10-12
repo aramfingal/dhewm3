@@ -61,12 +61,16 @@ Verified with the harness on an M5 Max (1280x720, hidden window), commit of 2026
   draws it over the main menu; Metal and OpenGL screenshots match.
 - `r_multiSamples 4`: Metal renders into multisampled targets and resolves; against
   OpenGL at 4x the demo frames differ in at most 0.06% of pixels. Validation clean at 4x.
+- Mirrors, heat-haze glass and cube-map reflections (`special_*` scenarios, positions taken
+  from the map data): Metal matches OpenGL (at most 0.1% of pixels).
+- `set r_backend opengl; vid_restart` and back to `metal` in one session
+  (`switch_base_alphalabs1`): works both ways; the first and third screenshots are identical.
 
 Not verified:
 - A visible window (focus, resize, fullscreen, presentation pacing on screen): every run so
   far kept the window hidden so the Mac stayed usable.
-- Mirrors and remote cameras, the d3xp post-process materials and debug tools (`r_show*`)
-  are implemented through the same GL layer but no harness scenario looks at them yet.
+- Remote camera GUIs, the d3xp post-process materials (blood orb, enviro suit) and the
+  debug tools (`r_show*`) go through the same GL layer but no harness scenario looks at them.
 
 ## Next
 

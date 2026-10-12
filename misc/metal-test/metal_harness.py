@@ -53,6 +53,7 @@ ALL_MAPS = [
     ("d3xp", "game/hell", "views"),
 ]
 QUICK_MAPS = [ALL_MAPS[1], ALL_MAPS[2], ALL_MAPS[4], ALL_MAPS[5]]
+SPECIAL_MAPS = [("base", "game/mars_city1"), ("base", "game/delta2a"), ("base", "game/hell1")]
 VIEWS_PER_MAP = 6
 INTRO_SHOT_TICS = [700, 1000, 1400, 1800]
 
@@ -346,6 +347,116 @@ def map_viewpoints(data, game, mapname, count=VIEWS_PER_MAP):
     return views
 
 
+# ---- views of special surfaces (mirrors, heat haze, cube map reflections) ----------------
+
+_material_flags = None
+SPECIAL_KINDS = ["mirror", "heathaze", "cube"]
+
+
+def _read_from_pk4s(data, folders, name):
+    for folder in folders:
+        for pk in sorted(glob.glob(os.path.join(data, folder, "*.pk4")), reverse=True):
+            try:
+                with zipfile.ZipFile(pk) as z:
+                    if name in z.namelist():
+                        return z.read(name).decode("latin1")
+            except zipfile.BadZipFile:
+                continue
+    return None
+
+
+def material_flags(data):
+    """Material name -> kinds of special rendering it asks for, from every .mtr file."""
+    global _material_flags
+    if _material_flags is not None:
+        return _material_flags
+    flags = {}
+    for folder in ("base", "d3xp"):
+        for pk in sorted(glob.glob(os.path.join(data, folder, "*.pk4"))):
+            try:
+                z = zipfile.ZipFile(pk)
+            except zipfile.BadZipFile:
+                continue
+            for n in z.namelist():
+                if not (n.startswith("materials/") and n.endswith(".mtr")):
+                    continue
+                t = re.sub(r"//[^\n]*", "", z.read(n).decode("latin1"))
+                end = 0
+                for m in re.finditer(r"(?m)^\s*(?:material\s+)?([\w/\.\-]+)\s*\{", t):
+                    if m.start() < end:
+                        continue
+                    depth, j = 0, m.end() - 1
+                    while j < len(t):
+                        if t[j] == "{":
+                            depth += 1
+                        elif t[j] == "}":
+                            depth -= 1
+                            if depth == 0:
+                                break
+                        j += 1
+                    body, end = t[m.end():j].lower(), j
+                    kinds = set()
+                    if re.search(r"\bmirror\b", body):
+                        kinds.add("mirror")
+                    if "heathaze" in body:
+                        kinds.add("heathaze")
+                    if "cubemap" in body:
+                        kinds.add("cube")
+                    if kinds:
+                        flags[m.group(1).lower()] = kinds
+    _material_flags = flags
+    return flags
+
+
+def special_views(data, game, mapname):
+    """For each kind in SPECIAL_KINDS, a view of the largest roughly vertical world surface
+    of that kind: 96 units in front of its centre, looking at it. From the map's .proc."""
+    folders = [game, "base"] if game != "base" else ["base"]
+    text = _read_from_pk4s(data, folders, "maps/%s.proc" % mapname)
+    if not text:
+        return []
+    flags = material_flags(data)
+    best = {}
+    for m in re.finditer(r'/\* surface \d+ \*/ \{ "([^"]+)" /\* numVerts = \*/ (\d+)', text):
+        kinds = flags.get(m.group(1).lower())
+        if not kinds:
+            continue
+        count = int(m.group(2))
+        verts = re.findall(r"\(\s*([-\d.e]+) ([-\d.e]+) ([-\d.e]+) [-\d.e]+ [-\d.e]+ ([-\d.e]+) ([-\d.e]+) ([-\d.e]+)\s*\)",
+                           text[m.end():m.end() + count * 120])[:count]
+        if len(verts) < 3:
+            continue
+        v = [[float(x) for x in t] for t in verts]
+        c = [sum(p[i] for p in v) / len(v) for i in range(3)]
+        nrm = [sum(p[3 + i] for p in v) / len(v) for i in range(3)]
+        length = (nrm[0] ** 2 + nrm[1] ** 2 + nrm[2] ** 2) ** 0.5
+        if length < 0.5 or abs(nrm[2]) / length > 0.5:
+            continue
+        extent = max(max(p[i] for p in v) - min(p[i] for p in v) for i in range(3))
+        import math
+        yaw = math.degrees(math.atan2(-nrm[1], -nrm[0])) % 360
+        view = (round(c[0] + nrm[0] / length * 96, 1), round(c[1] + nrm[1] / length * 96, 1),
+                round(c[2], 1), round(yaw, 1))
+        for k in kinds:
+            if k not in best or extent > best[k][0]:
+                best[k] = (extent, view)
+    return [(k, best[k][1]) for k in SPECIAL_KINDS if k in best]
+
+
+def special_cfg(data, game, mapname):
+    """Like views_cfg, but game time keeps running (heat haze scrolls with time) and the
+    views are of special surfaces. Compared with a looser eye: not frozen."""
+    lines = ["map %s" % mapname]
+    for _ in range(10):
+        lines += ["wait 60", "skipCinematic"]
+    lines += ["wait 150", "god", "notarget", "noclip", "wait 2", "set g_stopTime 1", "wait 2"]
+    for kind, (x, y, z, yaw) in special_views(data, game, mapname):
+        lines += ["setviewpos %s %s %s %s" % (x, y, z, yaw), "wait 10",
+                  "screenshot shots/%s.tga" % kind, "wait 3"]
+    lines += ["quit"]
+    return "\n".join(lines) + "\n"
+
+
 def views_cfg(data, game, mapname):
     """Fixed views of a frozen world: skip the opening cinematic if there is one, let the
     level run for a fixed number of tics, then stop game time (g_stopTime) so lights,
@@ -399,6 +510,19 @@ def demoshots_cfg(demo):
     return "timeDemoQuit %s\n" % demo
 
 
+def switch_cfg(mapname, first):
+    """Change the backend with vid_restart, twice: screenshots with the first backend, the
+    other one, and the first again."""
+    other = "opengl" if first == "metal" else "metal"
+    lines = ["map %s" % mapname]
+    for _ in range(10):
+        lines += ["wait 60", "skipCinematic"]
+    lines += ["wait 150", "god", "notarget", "set g_stopTime 1", "wait 5", "screenshot shots/first.tga", "wait 3",
+              "set r_backend %s" % other, "vid_restart", "wait 60", "screenshot shots/other.tga", "wait 3",
+              "set r_backend %s" % first, "vid_restart", "wait 60", "screenshot shots/again.tga", "wait 3", "quit"]
+    return "\n".join(lines) + "\n"
+
+
 def timedemo_cfg(demo):
     return "timeDemoQuit %s\n" % demo
 
@@ -422,6 +546,12 @@ def build_scenarios(args, renderer):
                          "cfg": intro_cfg(mapname),
                          "shots": ["intro%d" % i for i in range(len(INTRO_SHOT_TICS))],
                          "diff": True, "cvars": {"com_fixedTic": "1"}})
+    for game, mapname in (SPECIAL_MAPS if args.suite == "full" else SPECIAL_MAPS[:1]):
+        kinds = [k for k, _ in special_views(args.data, game, mapname)]
+        if kinds:
+            scen.append({"name": scen_name("special", game, mapname), "game": game,
+                         "cfg": special_cfg(args.data, game, mapname), "shots": kinds,
+                         "diff": True, "cvars": {"com_fixedTic": "1"}})
     scen.append({"name": "demoshots_demo1", "game": "base", "cfg": demoshots_cfg("demo1"),
                  "shots": ["demo_%05d" % f for f in DEMO_SHOT_FRAMES], "diff": True,
                  "cvars": {"com_fixedTic": "-1",
@@ -429,6 +559,9 @@ def build_scenarios(args, renderer):
     if args.suite == "full":
         scen.append({"name": "settings_menu", "game": "base", "cfg": settings_cfg(),
                      "shots": ["settings"], "diff": True, "cvars": {}})
+        scen.append({"name": "switch_base_alphalabs1", "game": "base",
+                     "cfg": switch_cfg("game/alphalabs1", renderer), "shots": ["first", "other", "again"],
+                     "diff": False, "cvars": {"com_fixedTic": "1"}})
         scen.append({"name": "restart_base_alphalabs1", "game": "base",
                      "cfg": restart_cfg("game/alphalabs1"), "shots": ["before", "after"],
                      "diff": False, "cvars": {"com_fixedTic": "1"}})

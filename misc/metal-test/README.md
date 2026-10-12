@@ -36,6 +36,9 @@ two result folders (`--strict` treats flagged images as failures).
 | `views_<game>_<map>` | six fixed views per map, compared across renderers and builds |
 | `demoshots_demo1` | `timeDemo demo1` with screenshots at 16 fixed demo frames (`com_demoShotFrames`). A render demo replays recorded scenes, so this is the strictest comparison: two OpenGL runs are bit-identical |
 | `intro_base_mars_city1` | (full suite) the opening cinematic at four fixed tics |
+| `special_<game>_<map>` | views of the largest mirror, heat-haze and cube-map surface of the map, found in the map's `.proc` and the materials (mars_city1; full suite adds delta2a, hell1) |
+| `settings_menu` | (full suite) the dhewm3 settings menu (Dear ImGui) over the main menu |
+| `switch_base_alphalabs1` | (full suite) `set r_backend <other>; vid_restart` and back: three screenshots in one session |
 | `restart_base_alphalabs1` | (full suite) `vid_restart` with a map loaded; screenshot before and after |
 | `timedemo_demo1_rN` | `timeDemoQuit demo1`, fps (2 runs quick, 3 full) |
 | `validation_<map>` | with `--validation`, Metal only: a views run under `MTL_DEBUG_LAYER=1` and `MTL_SHADER_VALIDATION=1` |
