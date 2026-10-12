@@ -2569,7 +2569,10 @@ void idCommonLocal::Frame( void ) {
 					nextTicTime = now;
 				} // else a new tic is started anyway (which often means that this frame was too long)
 			}
-			else if ( com_ticNumber == ticNumAtStart ) {
+			else if ( com_ticNumber == ticNumAtStart
+				&& cvarSystem->GetCVarInteger( "com_fixedTic" ) >= 0 ) {
+				// com_fixedTic -1: don't sync to time at all, so a timedemo
+				// measures the renderer instead of the 60Hz tic rate
 				Com_WaitForNextTicStart();
 			}
 			// else the com_ticNumber has already been updated and it's past time to start the next frame

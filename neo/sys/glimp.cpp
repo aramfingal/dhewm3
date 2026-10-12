@@ -211,6 +211,12 @@ bool GLimp_Init(glimpParms_t parms) {
 		flags |= SDL_WINDOW_RESIZABLE;
 	}
 
+	// automated runs (misc/metal-test): the window is never shown, so it cannot come
+	// to the front or take keyboard focus
+	if ( getenv( "SDL_MAC_BACKGROUND_APP" ) ) {
+		flags |= SDL_WINDOW_HIDDEN;
+	}
+
 	/* Doom3 has the nasty habit of modifying the default framebuffer's alpha channel and then
 	 * relying on those modifications in blending operations (using GL_DST_(ONE_MINUS_)ALPHA).
 	 * So far that hasn't been much of a problem, because Windows, macOS, X11 etc

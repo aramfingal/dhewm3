@@ -697,6 +697,20 @@ static void Session_TimeDemo_f( const idCmdArgs &args ) {
 
 /*
 ================
+Session_SkipCinematic_f
+
+Same as pressing escape during a cinematic. For scripted test runs (misc/metal-test).
+================
+*/
+static void Session_SkipCinematic_f( const idCmdArgs &args ) {
+	if ( sessLocal.mapSpawned && game ) {
+		idUserInterface *gui = NULL;
+		game->HandleESC( &gui );
+	}
+}
+
+/*
+================
 Session_TimeDemoQuit_f
 ================
 */
@@ -2991,6 +3005,7 @@ void idSessionLocal::Init() {
 	cmdSystem->AddCommand( "stopRecording", Session_StopRecordingDemo_f, CMD_FL_SYSTEM, "stops demo recording" );
 	cmdSystem->AddCommand( "playDemo", Session_PlayDemo_f, CMD_FL_SYSTEM, "plays back a demo", idCmdSystem::ArgCompletion_DemoName );
 	cmdSystem->AddCommand( "timeDemo", Session_TimeDemo_f, CMD_FL_SYSTEM, "times a demo", idCmdSystem::ArgCompletion_DemoName );
+	cmdSystem->AddCommand( "skipCinematic", Session_SkipCinematic_f, CMD_FL_SYSTEM, "skips the cinematic that is playing" );
 	cmdSystem->AddCommand( "timeDemoQuit", Session_TimeDemoQuit_f, CMD_FL_SYSTEM, "times a demo and quits", idCmdSystem::ArgCompletion_DemoName );
 	cmdSystem->AddCommand( "aviDemo", Session_AVIDemo_f, CMD_FL_SYSTEM, "writes AVIs for a demo", idCmdSystem::ArgCompletion_DemoName );
 	cmdSystem->AddCommand( "compressDemo", Session_CompressDemo_f, CMD_FL_SYSTEM, "compresses a demo file", idCmdSystem::ArgCompletion_DemoName );
