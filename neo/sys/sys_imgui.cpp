@@ -83,6 +83,7 @@ namespace ImGuiHooks {
 #endif
 
 static SDL_Window* sdlWindow = NULL;
+static bool imgui_initialized = false;
 ImGuiContext* imguiCtx = NULL;
 static bool haveNewFrame = false;
 static int openImguiWindows = 0; // or-ed enum D3ImGuiWindow values
@@ -166,6 +167,9 @@ static void UpdateWarningOverlay()
 
 void ShowWarningOverlay( const char* text )
 {
+	if ( !imgui_initialized ) {
+		return;	// no Dear ImGui with the Metal backend yet
+	}
 	warningOverlayText = text;
 	warningOverlayStartTime = ImGui::GetTime();
 	warningOverlayStartPos = ImGui::GetMousePos();
@@ -210,7 +214,6 @@ void SetScale( float scale )
 	imgui_scale.SetFloat( scale );
 }
 
-static bool imgui_initialized = false;
 
 // using void* instead of SDL_Window and SDL_GLContext to avoid dragging SDL headers into sys_imgui.h
 bool Init(void* _sdlWindow, void* sdlGlContext)
@@ -317,6 +320,9 @@ void Shutdown()
 // => ProcessEvent() has already been called (probably multiple times)
 void NewFrame()
 {
+	if ( !imgui_initialized ) {
+		return;	// no Dear ImGui with the Metal backend yet
+	}
 	D3P_ScopedCPUSample(Imgui_NewFrame);
 	// it can happen that NewFrame() is called without EndFrame() having been called
 	// after the last NewFrame() call, for example when D3Radiant is active and in
@@ -382,6 +388,9 @@ bool keybindModeEnabled = false;
 // returns true if ImGui has handled the event (so it shouldn't be handled by D3)
 bool ProcessEvent(const void* sdlEvent)
 {
+	if ( !imgui_initialized ) {
+		return false;	// no Dear ImGui with the Metal backend yet
+	}
 	if (openImguiWindows == 0)
 		return false;
 
@@ -464,6 +473,9 @@ void SetKeyBindMode( bool enable )
 
 bool ShouldShowCursor()
 {
+	if ( !imgui_initialized ) {
+		return false;	// no Dear ImGui with the Metal backend yet
+	}
 	if ( sessLocal.GetActiveMenu() == nullptr ) {
 		// when ingame, render the ImGui/SDL/system cursor if an ImGui window is open
 		// because dhewm3 does *not* render its own cursor outside ImGui windows.
@@ -521,6 +533,9 @@ bool ShouldShowCursor()
 
 void EndFrame()
 {
+	if ( !imgui_initialized ) {
+		return;	// no Dear ImGui with the Metal backend yet
+	}
 	if (openImguiWindows == 0 && !haveNewFrame)
 		return;
 
@@ -574,6 +589,9 @@ void EndFrame()
 
 void OpenWindow( D3ImGuiWindow win )
 {
+	if ( !imgui_initialized ) {
+		return;	// no Dear ImGui with the Metal backend yet
+	}
 	if ( openImguiWindows & win )
 		return; // already open
 

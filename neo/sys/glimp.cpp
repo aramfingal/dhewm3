@@ -45,6 +45,22 @@ If you have questions concerning this license or the applicable additional terms
 
 #include "sys/sys_imgui.h"
 
+// Metal backend (r_backend metal, macOS with SDL2): the window gets a Metal view instead of
+// a GL context, and the qgl function pointers come from the GL-on-Metal layer in
+// renderer/metal/. See docs/metal/DESIGN.md.
+#if defined(D3_METAL)
+  #include <SDL_metal.h>
+  #include "renderer/metal/metal_host.h"
+  extern idCVar r_backend;
+  extern idCVar r_metalHidden;
+  static SDL_MetalView metalView = NULL;
+#endif
+static bool usingMetal = false;
+
+bool GLimp_UsingMetal() {
+	return usingMetal;
+}
+
 #if defined(_WIN32) && defined(ID_ALLOW_TOOLS)
 #include "sys/win32/win_local.h"
 
@@ -186,6 +202,21 @@ bool GLimp_Init(glimpParms_t parms) {
 
 	My_SDL_WindowFlags flags = SDL_WINDOW_OPENGL;
 
+	usingMetal = false;
+#if defined(D3_METAL)
+	if ( idStr::Icmp( r_backend.GetString(), "metal" ) == 0 ) {
+		usingMetal = true;
+		flags = SDL_WINDOW_METAL;
+		common->Printf( "Using the Metal backend (r_backend metal)\n" );
+	} else if ( idStr::Icmp( r_backend.GetString(), "opengl" ) != 0 ) {
+		common->Warning( "unknown r_backend '%s', using opengl", r_backend.GetString() );
+	}
+#else
+	if ( idStr::Icmp( cvarSystem->GetCVarString( "r_backend" ), "metal" ) == 0 ) {
+		common->Warning( "r_backend metal is not available in this build, using opengl" );
+	}
+#endif
+
 	if (parms.fullScreen == 1)
 	{
 #if SDL_VERSION_ATLEAST(3, 0, 0)
@@ -216,6 +247,11 @@ bool GLimp_Init(glimpParms_t parms) {
 	if ( getenv( "SDL_MAC_BACKGROUND_APP" ) ) {
 		flags |= SDL_WINDOW_HIDDEN;
 	}
+#if defined(D3_METAL)
+	if ( usingMetal && r_metalHidden.GetBool() ) {
+		flags |= SDL_WINDOW_HIDDEN;
+	}
+#endif
 
 	/* Doom3 has the nasty habit of modifying the default framebuffer's alpha channel and then
 	 * relying on those modifications in blending operations (using GL_DST_(ONE_MINUS_)ALPHA).
@@ -579,6 +615,24 @@ try_again:
 		}
 	#endif // SDL2
 
+#if defined(D3_METAL)
+		if ( usingMetal ) {
+			metalView = SDL_Metal_CreateView( window );
+			void *layer = metalView ? SDL_Metal_GetLayer( metalView ) : NULL;
+			int dw = parms.width, dh = parms.height;
+			SDL_Metal_GetDrawableSize( window, &dw, &dh );
+			if ( !layer || !MGL_Init( layer, dw, dh ) ) {
+				common->Warning( "Couldn't initialise Metal: %s", SDL_GetError() );
+				if ( metalView ) {
+					SDL_Metal_DestroyView( metalView );
+					metalView = NULL;
+				}
+				SDL_DestroyWindow( window );
+				window = NULL;
+				return false;
+			}
+		} else
+#endif
 		context = SDL_GL_CreateContext(window);
 
 		GLimp_SetSwapInterval( r_swapInterval.GetInteger() );
@@ -766,6 +820,15 @@ try_again:
 			else
 				msaaStr = "no MSAA";
 
+			if ( usingMetal ) {
+				// the Metal scene target: BGRA8 with 32 bit depth and 8 bit stencil, no MSAA
+				r = g = b = a = 8;
+				d = 24;
+				s = 8;
+				msaa = 0;
+				msaaStr = "no MSAA";
+			}
+
 			common->Printf("Got %d stencil bits, %d depth bits, color bits: r%d g%d b%d a%d and %s\n", s, d, r, g, b, a, msaaStr.c_str());
 
 			glConfig.colorBits = r+g+b; // a bit imprecise, but seems to be used only in GfxInfo_f()
@@ -816,7 +879,11 @@ try_again:
 
 #if SDL_VERSION_ATLEAST(2, 0, 0)
 	// SDL1.2 has no context, and is not supported by ImGui anyway
-	D3::ImGuiHooks::Init(window, context);
+	// (the Metal backend does not run Dear ImGui yet: its GL2 backend needs more of GL
+	//  than the Metal layer implements, see FOLLOWUPS.md)
+	if ( !usingMetal ) {
+		D3::ImGuiHooks::Init(window, context);
+	}
 #endif
 
 	return true;
@@ -1118,6 +1185,17 @@ void GLimp_Shutdown() {
 
 	common->Printf("Shutting down OpenGL subsystem\n");
 
+#if defined(D3_METAL)
+	if ( usingMetal ) {
+		MGL_Shutdown();
+		if ( metalView ) {
+			SDL_Metal_DestroyView( metalView );
+			metalView = NULL;
+		}
+		usingMetal = false;
+	}
+#endif
+
 #if SDL_VERSION_ATLEAST(2, 0, 0)
 	if (context) {
 		SDL_GL_DeleteContext(context);
@@ -1137,6 +1215,13 @@ GLimp_SwapBuffers
 ===================
 */
 void GLimp_SwapBuffers() {
+#if defined(D3_METAL)
+	if ( usingMetal ) {
+		MGL_SwapBuffers();
+		D3P_NAMED_FRAMEMARK("Render Frame");
+		return;
+	}
+#endif
 	D3P_BeginCPUSample(SDL_GL_SwapWindow);
 #if SDL_VERSION_ATLEAST(2, 0, 0)
 	SDL_GL_SwapWindow(window);
@@ -1248,6 +1333,11 @@ GLimp_ExtensionPointer
 GLExtension_t GLimp_ExtensionPointer(const char *name) {
 	assert(SDL_WasInit(SDL_INIT_VIDEO));
 
+#if defined(D3_METAL)
+	if ( usingMetal ) {
+		return (GLExtension_t)MGL_GetProcAddress( name );
+	}
+#endif
 	return (GLExtension_t)SDL_GL_GetProcAddress(name);
 }
 
@@ -1295,6 +1385,11 @@ void GLimp_GrabInput(int flags) {
 static int cur_swapInterval = 0;
 bool GLimp_SetSwapInterval( int swapInterval )
 {
+	if ( usingMetal ) {
+		// the Metal device layer reads r_swapInterval itself
+		cur_swapInterval = swapInterval;
+		return true;
+	}
 #if SDL_VERSION_ATLEAST(2, 0, 0)
   #if SDL_VERSION_ATLEAST(3, 0, 0)
 	if ( ! SDL_GL_SetSwapInterval( swapInterval ) ) {
@@ -1347,6 +1442,12 @@ void GLimp_UpdateWindowSize()
 		glConfig.winHeight = fullscreenMode->h;
 	}
   #else // SDL2
+#if defined(D3_METAL)
+	if ( usingMetal ) {
+		SDL_Metal_GetDrawableSize( window, &glConfig.vidWidth, &glConfig.vidHeight );
+		MGL_Resize( glConfig.vidWidth, glConfig.vidHeight );
+	} else
+#endif
 	SDL_GL_GetDrawableSize( window, &glConfig.vidWidth, &glConfig.vidHeight );
 	if ( (winFlags & SDL_WINDOW_FULLSCREEN_DESKTOP) == SDL_WINDOW_FULLSCREEN ) {
 		// real fullscreen mode => must use SDL_GetWindowDisplayMode()
