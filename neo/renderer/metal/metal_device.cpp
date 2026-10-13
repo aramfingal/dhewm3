@@ -1295,10 +1295,12 @@ static bool GLMetal_ShouldPresent( void ) {
 		const uint64_t now = GLMetal_NowNs();
 		// a little under one refresh interval, so that no refresh goes without a new frame
 		const uint64_t interval = (uint64_t)( 0.9 * 1e9 / hz );
+		// s_lastPresentNs is the time the last drawable was handed out (GLMetal_Present).
+		// Measuring from before the wait for it would let that wait use up the interval,
+		// and every frame would present and block again: a cap at the refresh rate.
 		if ( s_lastPresentNs && now - s_lastPresentNs < interval ) {
 			return false;
 		}
-		s_lastPresentNs = now;
 	}
 	return true;
 }
@@ -1468,7 +1470,8 @@ void GLMetal_Present( void ) {
 	if ( GLMetal_ShouldPresent() && s_presentPipeline ) {
 		const uint64_t waitStart = GLMetal_NowNs();
 		s_drawable = s_layer->nextDrawable();
-		s_frameStats.drawableWaitNs += GLMetal_NowNs() - waitStart;
+		s_lastPresentNs = GLMetal_NowNs();
+		s_frameStats.drawableWaitNs += s_lastPresentNs - waitStart;
 		if ( !s_drawable || !s_drawable->texture() ) {
 			MetalHost_Warning( "[Metal] nextDrawable() returned null" );
 			s_drawable = nullptr;
