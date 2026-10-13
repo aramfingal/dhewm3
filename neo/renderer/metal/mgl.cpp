@@ -2573,6 +2573,18 @@ extern "C" void MGL_Shutdown( void ) {
 	GLMetal_Shutdown();
 }
 
+extern "C" float MGL_BeginParticleLayer( void ) {
+	if ( gl.polygonMode != GL_FILL || gl.alphaTest || ( gl.depthTest && gl.depthFunc != GL_ALWAYS ) ||
+		 ( gl.stencilTest && gl.stencilFunc != GL_ALWAYS ) ) {
+		return 0.0f;
+	}
+	return (float)GLMetal_BeginBlendLayer( CurrentBlendKey() );
+}
+
+extern "C" void MGL_EndParticleLayer( void ) {
+	GLMetal_EndBlendLayer();
+}
+
 extern "C" void MGL_SwapBuffers( void ) {
 	if ( initialized ) {
 		GLMetal_Present();

@@ -1213,6 +1213,31 @@ void GLimp_Shutdown() {
 GLimp_SwapBuffers
 ===================
 */
+/*
+===================
+GLimp_BeginParticleLayer
+
+The Metal backend can draw soft particles into a layer of lower resolution. Returns 0, or
+how many times smaller than the screen that layer is.
+===================
+*/
+float GLimp_BeginParticleLayer() {
+#if defined(D3_METAL)
+	if ( usingMetal ) {
+		return MGL_BeginParticleLayer();
+	}
+#endif
+	return 0.0f;
+}
+
+void GLimp_EndParticleLayer() {
+#if defined(D3_METAL)
+	if ( usingMetal ) {
+		MGL_EndParticleLayer();
+	}
+#endif
+}
+
 void GLimp_SwapBuffers() {
 #if defined(D3_METAL)
 	if ( usingMetal ) {

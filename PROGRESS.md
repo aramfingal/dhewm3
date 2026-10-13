@@ -128,6 +128,26 @@ multisampling"). Measured from the owner's save, hidden window, not presenting: 
 fps at that spot, 527 -> 1026 fps with no particles in view; OpenGL gives 114 there. Harness
 at 8x MSAA (views, special, settings) passes with and without the replay and the two match.
 
+## Steam and multisampling, second round (Metal)
+
+Same save (alphalabs1, steam, 2560x1440, 8x MSAA, hidden window, not presenting):
+
+| | fps |
+|---|---|
+| before any of this | 152 |
+| depth copy by replay | 338 |
+| last pass of a frame does not store samples, depth, stencil | 410 |
+| soft particles in a half-size layer (`r_metalParticleLayer 2`, the default) | 1,166 |
+| same view without particles | 2,217 (was 1,026) |
+
+Verified: harness views, special, settings, switch, demoshots, flashlight on Metal with the
+layer on and off, with 0 and 8 samples, all pass and no image is flagged between on and off;
+Metal against OpenGL at the harness defaults passes. Tried and dropped: depth testing soft
+particles one radius nearer (same image, no gain: the hidden steam is within its radius of a
+surface) and discarding faded fragments (slower).
+
+Not verified: how the layer looks in play (a person at the screen), particle-heavy fights.
+
 ## Next
 
 - FOLLOWUPS.md: a visible-window test, a harness scenario for subviews and post-process

@@ -1080,8 +1080,27 @@ void RB_STD_T_RenderShaderPasses( const drawSurf_t *surf ) {
 			}
 			qglProgramEnvParameter4fvARB( GL_FRAGMENT_PROGRAM_ARB, PP_PARTICLE_COLCHAN_MASK, parm );
 			
+			// The Metal backend may draw soft particles into a smaller layer: fragment.position
+			// is then in the pixels of that layer.
+			float depthRecip[4] = {
+				1.0f / globalImages->currentDepthImage->uploadWidth,
+				1.0f / globalImages->currentDepthImage->uploadHeight,
+				static_cast<float>(globalImages->currentRenderImage->uploadWidth) / globalImages->currentDepthImage->uploadWidth,
+				static_cast<float>(globalImages->currentRenderImage->uploadHeight) / globalImages->currentDepthImage->uploadHeight
+			};
+			const float layerScale = GLimp_BeginParticleLayer();
+			if ( layerScale > 0.0f ) {
+				const float scaled[4] = { depthRecip[0] * layerScale, depthRecip[1] * layerScale, depthRecip[2], depthRecip[3] };
+				qglProgramEnvParameter4fvARB( GL_FRAGMENT_PROGRAM_ARB, PP_CURDEPTH_RECIPR, scaled );
+			}
+
 			// draw it
 			RB_DrawElementsWithCounters( tri );
+
+			if ( layerScale > 0.0f ) {
+				GLimp_EndParticleLayer();
+				qglProgramEnvParameter4fvARB( GL_FRAGMENT_PROGRAM_ARB, PP_CURDEPTH_RECIPR, depthRecip );
+			}
 
 			// Clean up GL state
 			GL_SelectTexture( 1 );

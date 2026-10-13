@@ -703,6 +703,9 @@ def base_command(binary, renderer, data, home, res, game, cvars):
            "+set", "r_customHeight", str(res[1]),
            "+set", "r_multiSamples", "0",
            "+set", "r_swapInterval", "0",
+           # Metal draws soft particles into a separate layer by default, which OpenGL
+           # cannot do: off for the comparison (test it with --set r_metalParticleLayer 2)
+           "+set", "r_metalParticleLayer", "0",
            "+set", "r_gamma", "1",
            "+set", "r_brightness", "1",
            "+set", "sys_lang", "english",   # the game data's default.cfg may pick another

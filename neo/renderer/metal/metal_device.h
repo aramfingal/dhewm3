@@ -161,6 +161,9 @@ void GLMetal_ReleaseBuffer( MTL::Buffer *buffer );
 void GLMetal_CopySceneToTexture( bool depth, int srcX, int srcY, int width, int height,
 								 MTL::Texture *dst, int dstX, int dstY, bool replay = false );
 bool GLMetal_CanReplayDepth( void );
+// Blend layer: see metal_device.cpp. Begin returns the scale of the layer, or 0 for none.
+int GLMetal_BeginBlendLayer( uint32_t blendKey );
+void GLMetal_EndBlendLayer( void );
 // A clear of the whole depth buffer is about to be drawn.
 void GLMetal_DepthBufferCleared( void );
 // Draw calls on the scene pass's encoder.
