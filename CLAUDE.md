@@ -59,15 +59,22 @@ code) are in `build/`. Run it with
 - `SDL_MAC_BACKGROUND_APP` handling (above).
 - arm64 macOS deployment target raised from 10.7 to 11.0 (`neo/CMakeLists.txt`).
 
-## HD texture packs
+## HD texture pack
 
-Two packs are installed outside the repo and the game data, in
-`~/Library/Application Support/dhewm3-packs/` (`d3hdp`, `hidef2k`). `misc/doom3.sh
-[d3hdp|hidef2k|vanilla] [roe]` starts the game with one of them through `fs_devpath`; never
-load both. The harness does not see them unless told to (`--set fs_devpath <folder>`, and
-`--fs-game hidef2k` for the Hi-Def 2K mod). Hi-Def 2K's own lighting program reads values
-its vertex program never writes, so Metal and OpenGL differ by a few percent of pixels with
-it; that is the pack, not the backend.
+The Doom 3 Essential HD Pack v2.0 is installed in the save path, outside the repo and the
+game data: `~/Library/Application Support/dhewm3/base/zzz_pak00*.pk4` and
+`.../dhewm3/d3xp/zzz_pak102.pk4`. Like Quake 3's pk3 files, pk4 files there load by
+themselves; removing them uninstalls the pack. The harness uses a throwaway `fs_savepath`,
+so it tests the original game data.
+
+## Armor mounted flashlight
+
+`g_mountedFlashlight 1` (default; `neo/game/Player.cpp` and `neo/d3xp/Player.cpp`,
+`UpdateMountedFlashlight`): selecting the flashlight weapon (F in the base game, 1 in RoE)
+or the `toggleFlashlight` command switches a light on the player's armor instead of
+swapping the weapon, as in the BFG Edition. It is the hand flashlight's own beam, a
+projected light only drawn in the player's view. Single player only; 0 gives the hand
+flashlight back. Harness scenario `flashlight_*`.
 
 ## Frame rate
 

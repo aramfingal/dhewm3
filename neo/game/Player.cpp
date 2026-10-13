@@ -955,6 +955,10 @@ idPlayer::idPlayer
 idPlayer::idPlayer() {
 	memset( &usercmd, 0, sizeof( usercmd ) );
 
+	memset( &mountedLight, 0, sizeof( mountedLight ) );
+	mountedLightHandle		= -1;
+	mountedLightOn			= false;
+
 	noclip					= false;
 	godmode					= false;
 
@@ -1609,6 +1613,7 @@ Release any resources used by the player.
 ==============
 */
 idPlayer::~idPlayer() {
+	FreeMountedFlashlight();
 	delete weapon.GetEntity();
 	weapon = NULL;
 }
@@ -3638,6 +3643,98 @@ void idPlayer::PrevWeapon( void ) {
 }
 
 /*
+===============================================================================
+
+	Armor mounted flashlight (g_mountedFlashlight)
+
+	A light on the player's armor that works with every weapon, like the one of the
+	BFG Edition. The flashlight key switches it on and off instead of selecting the hand
+	flashlight. The light exists only in the render world: nothing about it is saved, and
+	after loading a game it is off.
+
+===============================================================================
+*/
+
+/*
+==============
+idPlayer::FreeMountedFlashlight
+==============
+*/
+void idPlayer::FreeMountedFlashlight( void ) {
+	if ( mountedLightHandle != -1 ) {
+		if ( gameRenderWorld ) {
+			gameRenderWorld->FreeLightDef( mountedLightHandle );
+		}
+		mountedLightHandle = -1;
+	}
+}
+
+/*
+==============
+idPlayer::ToggleMountedFlashlight
+==============
+*/
+void idPlayer::ToggleMountedFlashlight( void ) {
+	mountedLightOn = !mountedLightOn;
+	// the click of the hand flashlight
+	const idSoundShader *click = declManager->FindSound( "flashlight_raise", false );
+	if ( click ) {
+		StartSoundShader( click, SND_CHANNEL_ITEM, 0, false, NULL );
+	}
+}
+
+/*
+==============
+idPlayer::UpdateMountedFlashlight
+
+Called every game frame, after the view has been calculated.
+==============
+*/
+void idPlayer::UpdateMountedFlashlight( void ) {
+	if ( !mountedLightOn || !g_mountedFlashlight.GetBool() || gameLocal.isMultiplayer || health <= 0 || spectating
+		 || gameLocal.inCinematic || privateCameraView || gameLocal.GetCamera() || objectiveSystemOpen ) {
+		FreeMountedFlashlight();
+		return;
+	}
+
+	renderLight_t &light = mountedLight;
+	if ( !light.shader ) {
+		// the hand flashlight's beam (def/weapon_flashlight.def), along the view
+		// direction: view axes are forward, left, up
+		light.shader = declManager->FindMaterial( "lights/flashlight5", false );
+		light.pointLight = false;
+		light.shaderParms[ SHADERPARM_RED ] = 1.0f;
+		light.shaderParms[ SHADERPARM_GREEN ] = 1.0f;
+		light.shaderParms[ SHADERPARM_BLUE ] = 1.0f;
+		light.shaderParms[ SHADERPARM_TIMESCALE ] = 1.0f;
+		light.lightRadius[0] = light.lightRadius[1] = light.lightRadius[2] = 400.0f;
+		light.target.Set( 1280.0f, 0.0f, 0.0f );
+		light.up.Set( 0.0f, 0.0f, 640.0f );
+		light.right.Set( 0.0f, -640.0f, 0.0f );
+		light.end = light.target;
+		// the first person weapon does not cast a shadow in this light (it has
+		// suppressShadowInLightID set to the id of the muzzle flash), and it is the
+		// light of this player's view
+		light.lightId = LIGHTID_VIEW_MUZZLE_FLASH + entityNumber;
+		light.allowLightInViewID = entityNumber + 1;
+	}
+	if ( !light.shader ) {
+		return;
+	}
+
+	// on the right shoulder: a little right of and below the eyes
+	light.axis = firstPersonViewAxis;
+	light.origin = firstPersonViewOrigin - firstPersonViewAxis[1] * 3.0f - firstPersonViewAxis[2] * 3.0f;
+	light.shaderParms[ SHADERPARM_TIMEOFFSET ] = -MS2SEC( gameLocal.time );
+
+	if ( mountedLightHandle == -1 ) {
+		mountedLightHandle = gameRenderWorld->AddLightDef( &light );
+	} else {
+		gameRenderWorld->UpdateLightDef( mountedLightHandle, &light );
+	}
+}
+
+/*
 ===============
 idPlayer::SelectWeapon
 ===============
@@ -3654,6 +3751,14 @@ void idPlayer::SelectWeapon( int num, bool force ) {
 	}
 
 	if ( gameLocal.isClient ) {
+		return;
+	}
+
+	// the flashlight key switches the light on the armor instead, also where the level
+	// allows no weapons and before the hand flashlight has been picked up
+	if ( !force && g_mountedFlashlight.GetBool() && !gameLocal.isMultiplayer
+		 && idStr::Icmp( spawnArgs.GetString( va( "def_weapon%d", num ) ), "weapon_flashlight" ) == 0 ) {
+		ToggleMountedFlashlight();
 		return;
 	}
 
@@ -6413,6 +6518,8 @@ void idPlayer::Think( void ) {
 
 		playerView.CalculateShake();
 	}
+
+	UpdateMountedFlashlight();
 
 	if ( !( thinkFlags & TH_THINK ) ) {
 		gameLocal.Printf( "player %d not thinking?\n", entityNumber );

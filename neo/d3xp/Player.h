@@ -307,6 +307,14 @@ public:
 	idUserInterface *		objectiveSystem;
 	bool					objectiveSystemOpen;
 
+	// armor mounted flashlight (g_mountedFlashlight); not saved
+	renderLight_t			mountedLight;
+	qhandle_t				mountedLightHandle;
+	bool					mountedLightOn;
+	void					ToggleMountedFlashlight( void );
+	void					UpdateMountedFlashlight( void );
+	void					FreeMountedFlashlight( void );
+
 	int						weapon_soulcube;
 	int						weapon_pda;
 	int						weapon_fists;

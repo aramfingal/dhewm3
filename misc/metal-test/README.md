@@ -55,6 +55,9 @@ Positions come from the map file itself: item entities spread through the entity
 56 units above each, yaw stepping by 90 degrees. Two OpenGL runs give images that differ in
 at most about 0.3% of pixels; an image is flagged above 0.5%.
 
+`flashlight_*` takes a view with the armor mounted flashlight off, on and off again
+(`toggleFlashlight`); the lit image must be at least 5% brighter than the other two.
+
 In the scripts `wait N` waits N frames (with `com_fixedTic 1`, N game tics). Stock dhewm3
 counted calls of the command buffer instead, which also happen once per input event; this
 fork counts frames, and that made the frozen views repeatable.

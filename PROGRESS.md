@@ -109,6 +109,16 @@ Not verified (needs a person at the screen): how it feels, i.e. mouse look with 
 on and off, vsync at the display's refresh rate, a long play session. Multiplayer is
 unchanged and still tied to tics.
 
+## Armor mounted flashlight (`g_mountedFlashlight`, branch `uncapped-fps`)
+
+The flashlight key switches a light on the player's armor instead of swapping the weapon
+(BFG Edition style; the Duct Tape mod only covers two weapons and replaces weapon defs the
+HD pack also replaces). Game code only, base and RoE; `toggleFlashlight` command for a key
+of its own. Harness scenario `flashlight_*` (off, on, off again): passes on OpenGL and Metal
+in alphalabs1 and erebus1, and the two renderers' images match.
+
+Not verified: by a person in play; the light is not saved in savegames (off after loading).
+
 ## Next
 
 - FOLLOWUPS.md: a visible-window test, a harness scenario for subviews and post-process

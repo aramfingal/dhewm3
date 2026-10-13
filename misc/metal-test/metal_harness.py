@@ -588,6 +588,20 @@ def smooth_intro_cfg(mapname):
     return "\n".join(lines) + "\n"
 
 
+def flashlight_cfg(data, game, mapname):
+    """The armor mounted flashlight (g_mountedFlashlight): toggleFlashlight
+    switches it on and off again, with a weapon in hand."""
+    x, y, z, yaw = map_viewpoints(data, game, mapname)[3]
+    lines = ["map %s" % mapname]
+    for _ in range(10):
+        lines += ["wait 60", "skipCinematic"]
+    lines += ["wait 150", "god", "notarget", "noclip", "wait 2",
+              "setviewpos %s %s %s %s" % (x, y, z, yaw), "wait 30", "screenshot shots/off.tga", "wait 2",
+              "toggleFlashlight", "wait 30", "screenshot shots/on.tga", "wait 2",
+              "toggleFlashlight", "wait 30", "screenshot shots/off_again.tga", "wait 2", "quit"]
+    return "\n".join(lines) + "\n"
+
+
 def timedemo_cfg(demo):
     return "timeDemoQuit %s\n" % demo
 
@@ -634,6 +648,11 @@ def build_scenarios(args, renderer):
                  "shots": ["%s%d" % (k, i) for i in range(n) for k in ("now", "back", "next")], "diff": False,
                  "same": [("back%d" % i, "now%d" % i) for i in range(n)],
                  "cvars": {"com_fixedTic": "1"}})
+    for game, mapname in ([("base", "game/alphalabs1")] + ([("d3xp", "game/erebus1")] if args.suite == "full" else [])):
+        scen.append({"name": scen_name("flashlight", game, mapname), "game": game,
+                     "cfg": flashlight_cfg(args.data, game, mapname), "shots": ["off", "on", "off_again"],
+                     "diff": True, "brighter": [("on", "off"), ("on", "off_again")],
+                     "cvars": {"com_fixedTic": "1", "g_mountedFlashlight": "1"}})
     scen.append({"name": "demoshots_demo1", "game": "base", "cfg": demoshots_cfg("demo1"),
                  "shots": ["demo_%05d" % f for f in DEMO_SHOT_FRAMES], "diff": True,
                  "cvars": {"com_fixedTic": "-1",
@@ -829,6 +848,11 @@ def run_scenario(args, label_dir, scen, binary, renderer):
             if st.get("error") or st["pct_pixels_differ"] > SAME_PERCENT:
                 status = "FAIL"
                 reasons.append("%s differs from %s: %s" % (a, b, st.get("error") or "%.2f%% of pixels" % st["pct_pixels_differ"]))
+    # pairs of screenshots of which the first must be clearly brighter
+    for a, b in scen.get("brighter", []):
+        if a in shots and b in shots and shots[a]["mean"] < shots[b]["mean"] * 1.05:
+            status = "FAIL"
+            reasons.append("%s (mean %.1f) is not brighter than %s (mean %.1f)" % (a, shots[a]["mean"], b, shots[b]["mean"]))
     if scen.get("timedemo") and "timedemo" not in metrics:
         status = "FAIL"
         reasons.append("no timedemo result in the log")

@@ -82,3 +82,10 @@ Each item: where, approach, risk, how to verify.
     lower the one tic of display latency by running the game faster; it changes physics.
     It can be merged on top of this: the interpolation code does not assume 60 Hz except
     in `wait` and `com_preciseFrameLengthMS`.
+
+## Armor mounted flashlight
+
+18. **Not saved** in savegames (off after a load), no battery, not in multiplayer.
+19. **RoE key**: RoE's default.cfg has F on `_impulse11`, which is the BFG there (the
+    flashlight is weapon 0, key 1). `bind f toggleFlashlight` gives F in RoE too.
+20. **The hand flashlight's melee attack** is not reachable while `g_mountedFlashlight` is 1.
