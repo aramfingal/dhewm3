@@ -155,8 +155,17 @@ void GLMetal_ReleaseTexture( MTL::Texture *texture );
 void GLMetal_ReleaseBuffer( MTL::Buffer *buffer );
 
 // Copies a rectangle of the scene colour (or depth) target into a texture of the same format.
+// `replay`: a depth copy may be made by drawing the frame's depth writes again in a command
+// buffer that runs before the frame's (GLMetal_CanReplayDepth), which leaves the scene pass
+// open. The caller must then pass a texture nothing drawn earlier in this frame samples.
 void GLMetal_CopySceneToTexture( bool depth, int srcX, int srcY, int width, int height,
-								 MTL::Texture *dst, int dstX, int dstY );
+								 MTL::Texture *dst, int dstX, int dstY, bool replay = false );
+bool GLMetal_CanReplayDepth( void );
+// A clear of the whole depth buffer is about to be drawn.
+void GLMetal_DepthBufferCleared( void );
+// Draw calls on the scene pass's encoder.
+void GLMetal_DrawIndexed( NS::UInteger count, MTL::IndexType indexType, MTL::Buffer *indexBuffer, NS::UInteger indexOffset );
+void GLMetal_Draw( MTL::PrimitiveType primitive, NS::UInteger first, NS::UInteger count );
 // Reads back scene colour as RGBA8 (row 0 = row 0 of the target), depth as float, or stencil as bytes.
 enum { METAL_READ_COLOR, METAL_READ_DEPTH, METAL_READ_STENCIL };
 bool GLMetal_ReadScenePixels( int what, int x, int y, int width, int height, void *dest );

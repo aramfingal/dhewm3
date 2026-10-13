@@ -80,6 +80,23 @@ C++11): `metal_host.cpp` is the bridge for printing and cvars.
 - **Gamma and brightness.** dhewm3 applies `r_gamma`/`r_brightness` by patching every ARB
   fragment program (`r_gammaInShader`). The translator sees the patched text, so Metal matches.
 
+## Depth copies with multisampling
+
+Soft particles (`r_useSoftParticles`, on by default) copy the depth buffer to a texture
+right after the depth fill. A copy means ending the scene pass and opening it again, and
+with multisampling that stores and reloads every sample; blending onto reloaded samples is
+then about three times slower than onto samples that never left the tile. In a steam-filled
+corridor of alphalabs1 at 2560x1440 with 8 samples this was 6.6 ms a frame.
+
+So with multisampling the device layer records the depth-writing draws of a frame
+(`GLMetal_RecordDepthDraw`), and a depth copy draws them again into a single-sample depth
+target in a command buffer of its own, committed at once so it runs before the frame's. The
+scene pass stays open. Because that buffer runs first, each depth copy of a frame goes to a
+storage of its own (`CopySceneDepth` in `mgl.cpp`), or a second view's copy would be what the
+first view's particles read. The copied depth is that of pixel centres instead of sample 0;
+images differ in about 0.003% of pixels. `r_metalNoDepthReplay 1` gives the old path.
+Colour copies (heat haze) still end the pass.
+
 ## What the GL layer implements
 
 The inventory (`GL_INVENTORY.md`) lists 108 entry points. Implemented groups: state

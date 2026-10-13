@@ -89,3 +89,12 @@ Each item: where, approach, risk, how to verify.
 19. **RoE key**: RoE's default.cfg has F on `_impulse11`, which is the BFG there (the
     flashlight is weapon 0, key 1). `bind f toggleFlashlight` gives F in RoE too.
 20. **The hand flashlight's melee attack** is not reachable while `g_mountedFlashlight` is 1.
+
+## Multisampling (Metal)
+
+21. **Colour copies still end the scene pass** (`_currentRender`: heat haze, glass
+    distortion). With 8 samples everything blended after one is slow, as depth copies were.
+22. **The last pass of a frame stores all samples** of colour, depth and stencil although
+    only the resolved colour is used; the store action could be chosen when the pass ends.
+23. **Soft particles are not depth tested** by design (the shader fades them), so steam
+    behind a wall is still filled; about a quarter of the particle cost in the test spot.

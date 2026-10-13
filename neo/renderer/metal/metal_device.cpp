@@ -155,6 +155,12 @@ static std::unordered_map<PipelineCacheKey, MTL::RenderPipelineState *, Pipeline
 static PipelineCacheKey s_lastPipelineKey = { -1, 0, 0 };
 static MTL::RenderPipelineState *s_lastPipeline = nullptr;
 
+// depth capture by replay (see GLMetal_RecordDepthDraw)
+static bool s_depthRecordValid = false;		// this frame's depth-writing draws are all in s_depthDraws
+static bool s_depthCurWrite = false;		// the depth/stencil state last set writes depth
+static PipelineCacheKey s_depthCurKey = { -1, 0, 0 };
+static MetalVertexLayout s_depthCurLayout;
+
 static std::unordered_map<uint64_t, MTL::DepthStencilState *> s_depthStencilCache;
 static uint64_t s_lastDepthStencilKey = ~0ull;
 static MTL::DepthStencilState *s_lastDepthStencilState = nullptr;
@@ -466,6 +472,7 @@ void GLMetal_SetDepthStencil( const MetalDepthStencilKey &key, uint32_t stencilR
 	}
 	s_want.depthStencil = state;
 	s_want.stencilRef = stencilRef;
+	s_depthCurWrite = ( key.depthWrite != 0 );
 	if ( !s_encoder ) {
 		return;
 	}
@@ -645,25 +652,8 @@ static void ConfigureBlendState( MTL::RenderPipelineColorAttachmentDescriptor *c
 	}
 }
 
-MTL::RenderPipelineState *GLMetal_GetPipeline( int programId, const MetalVertexLayout &layout, uint64_t layoutHash,
-											   uint32_t blendKey, bool lines ) {
-	(void)lines;
-	if ( programId < 0 || programId >= (int)s_programs.size() ) {
-		return nullptr;
-	}
-	PipelineCacheKey key = { programId, blendKey, layoutHash };
-	if ( s_lastPipeline && key == s_lastPipelineKey ) {
-		return s_lastPipeline;
-	}
-	auto it = s_pipelineCache.find( key );
-	if ( it != s_pipelineCache.end() ) {
-		if ( it->second ) {
-			s_lastPipelineKey = key;
-			s_lastPipeline = it->second;
-		}
-		return it->second;
-	}
-
+// `depthOnly`: the variant for the single-sample depth replay pass (no colour target).
+static MTL::RenderPipelineState *GLMetal_CreatePipeline( int programId, const MetalVertexLayout &layout, uint32_t blendKey, bool depthOnly ) {
 	const MetalProgramRecord &rec = s_programs[programId];
 	MTL::VertexDescriptor *vertexDesc = MTL::VertexDescriptor::alloc()->init();
 	for ( int i = 0; i < layout.numAttribs; i++ ) {
@@ -691,26 +681,266 @@ MTL::RenderPipelineState *GLMetal_GetPipeline( int programId, const MetalVertexL
 	pipelineDesc->setFragmentFunction( rec.frag );
 	pipelineDesc->setVertexDescriptor( vertexDesc );
 	pipelineDesc->setLabel( NS::String::string( rec.name.c_str(), NS::UTF8StringEncoding ) );
-	MTL::RenderPipelineColorAttachmentDescriptor *colorAttachment = pipelineDesc->colorAttachments()->object( 0 );
-	colorAttachment->setPixelFormat( s_colorPixelFormat );
 	pipelineDesc->setDepthAttachmentPixelFormat( s_depthPixelFormat );
 	pipelineDesc->setStencilAttachmentPixelFormat( s_depthPixelFormat );
-	pipelineDesc->setRasterSampleCount( (NS::UInteger)s_sampleCount );
-	ConfigureBlendState( colorAttachment, blendKey );
+	if ( depthOnly ) {
+		pipelineDesc->setRasterSampleCount( 1 );
+	} else {
+		MTL::RenderPipelineColorAttachmentDescriptor *colorAttachment = pipelineDesc->colorAttachments()->object( 0 );
+		colorAttachment->setPixelFormat( s_colorPixelFormat );
+		pipelineDesc->setRasterSampleCount( (NS::UInteger)s_sampleCount );
+		ConfigureBlendState( colorAttachment, blendKey );
+	}
 
 	NS::Error *error = nullptr;
 	MTL::RenderPipelineState *pipeline = s_device->newRenderPipelineState( pipelineDesc, &error );
 	pipelineDesc->release();
 	vertexDesc->release();
 	if ( !pipeline ) {
-		MetalHost_Warning( "[Metal] pipeline creation failed (%s, blend 0x%x): %s", rec.name.c_str(), blendKey, MetalErrorString( error ) );
+		MetalHost_Warning( "[Metal] pipeline creation failed (%s, blend 0x%x%s): %s", rec.name.c_str(), blendKey,
+						   depthOnly ? ", depth only" : "", MetalErrorString( error ) );
 	}
+	return pipeline;
+}
+
+MTL::RenderPipelineState *GLMetal_GetPipeline( int programId, const MetalVertexLayout &layout, uint64_t layoutHash,
+											   uint32_t blendKey, bool lines ) {
+	(void)lines;
+	if ( programId < 0 || programId >= (int)s_programs.size() ) {
+		return nullptr;
+	}
+	PipelineCacheKey key = { programId, blendKey, layoutHash };
+	if ( s_depthRecordValid && !( key == s_depthCurKey ) ) {
+		// what a depth-only variant of the pipeline about to be bound is made from
+		s_depthCurKey = key;
+		s_depthCurLayout = layout;
+	}
+	if ( s_lastPipeline && key == s_lastPipelineKey ) {
+		return s_lastPipeline;
+	}
+	auto it = s_pipelineCache.find( key );
+	if ( it != s_pipelineCache.end() ) {
+		if ( it->second ) {
+			s_lastPipelineKey = key;
+			s_lastPipeline = it->second;
+		}
+		return it->second;
+	}
+
+	MTL::RenderPipelineState *pipeline = GLMetal_CreatePipeline( programId, layout, blendKey, false );
 	s_pipelineCache.emplace( key, pipeline );
 	if ( pipeline ) {
 		s_lastPipelineKey = key;
 		s_lastPipeline = pipeline;
 	}
 	return pipeline;
+}
+
+// ============================================================================
+// Depth capture by replay
+//
+// Copying the depth buffer to a texture in the middle of a frame (soft particles do, right
+// after the depth fill) means ending the scene pass and opening it again. With multisampling
+// that stores and loads every sample of every attachment, and blending onto loaded samples
+// is several times slower than onto samples that never left the tile (measured: translucent
+// fill 1.6 ms against 4.7 ms at 2560x1440, 8 samples). So with multisampling the depth-writing
+// draws of a frame are recorded, and a depth copy draws them again into a single-sample depth
+// target, in a command buffer of its own that is committed at once and so runs before the
+// frame's. The scene pass is not touched.
+// ============================================================================
+
+static const int METAL_DEPTH_DRAW_TEXTURES = 8;
+static const int METAL_DEPTH_DRAW_BUFFERS = 12;
+struct MetalDepthDraw {
+	MTL::RenderPipelineState *pipeline;		// depth-only variant
+	MTL::DepthStencilState *depthStencil;
+	uint32_t stencilRef;
+	MTL::Viewport viewport;
+	MTL::ScissorRect scissor;
+	float depthBias, slopeScale, depthBiasClamp;
+	int8_t cullMode, fillMode;
+	uint8_t indexed, numVertexBuffers, numTextures;
+	uint8_t vertexSlot[METAL_DEPTH_DRAW_BUFFERS];
+	MTL::Buffer *vertexBuffer[METAL_DEPTH_DRAW_BUFFERS];
+	NS::UInteger vertexOffset[METAL_DEPTH_DRAW_BUFFERS];
+	MTL::Buffer *fragmentBuffer;			// slot 0
+	NS::UInteger fragmentOffset;
+	MTL::Texture *texture[METAL_DEPTH_DRAW_TEXTURES];
+	MTL::SamplerState *sampler[METAL_DEPTH_DRAW_TEXTURES];
+	MTL::PrimitiveType primitive;
+	MTL::IndexType indexType;
+	MTL::Buffer *indexBuffer;
+	NS::UInteger first, count;				// first: index buffer offset when indexed
+};
+static std::vector<MetalDepthDraw> s_depthDraws;
+static std::unordered_map<PipelineCacheKey, MTL::RenderPipelineState *, PipelineCacheKeyHash> s_depthPipelineCache;
+static MTL::Texture *s_replayDepth = nullptr;
+static uint64_t s_depthCopyFrame = ~0ull;	// the last frame that copied depth
+
+bool GLMetal_CanReplayDepth( void ) {
+	return s_depthRecordValid && s_sampleCount > 1;
+}
+
+// A clear of the whole depth buffer is about to be drawn: nothing before it matters.
+void GLMetal_DepthBufferCleared( void ) {
+	s_depthDraws.clear();
+}
+
+static void GLMetal_RecordDepthDraw( bool indexed, MTL::PrimitiveType primitive, MTL::IndexType indexType,
+									 MTL::Buffer *indexBuffer, NS::UInteger first, NS::UInteger count ) {
+	if ( !s_depthRecordValid || !s_depthCurWrite || !s_encState.pipeline ) {
+		return;
+	}
+	MetalDepthDraw d;
+	PipelineCacheKey key = { s_depthCurKey.programId, 0, s_depthCurKey.layoutHash };
+	auto it = s_depthPipelineCache.find( key );
+	if ( it != s_depthPipelineCache.end() ) {
+		d.pipeline = it->second;
+	} else {
+		d.pipeline = GLMetal_CreatePipeline( key.programId, s_depthCurLayout, 0, true );
+		s_depthPipelineCache.emplace( key, d.pipeline );
+	}
+	d.numVertexBuffers = 0;
+	for ( int i = 0; i < METAL_MAX_BUFFER_SLOTS; i++ ) {
+		if ( !s_encState.vertexBuffer[i] ) {
+			continue;
+		}
+		if ( d.numVertexBuffers == METAL_DEPTH_DRAW_BUFFERS ) {
+			d.pipeline = nullptr;
+			break;
+		}
+		d.vertexSlot[d.numVertexBuffers] = (uint8_t)i;
+		d.vertexBuffer[d.numVertexBuffers] = s_encState.vertexBuffer[i];
+		d.vertexOffset[d.numVertexBuffers] = s_encState.vertexOffset[i];
+		d.numVertexBuffers++;
+	}
+	if ( !d.pipeline || !s_encState.depthStencil ) {
+		// cannot be drawn again: copies fall back to ending the pass
+		s_depthRecordValid = false;
+		s_depthDraws.clear();
+		return;
+	}
+	d.depthStencil = s_encState.depthStencil;
+	d.stencilRef = s_encState.stencilReference;
+	d.viewport = s_encState.viewport;
+	d.scissor = s_encState.scissor;
+	d.depthBias = s_encState.depthBias;
+	d.slopeScale = s_encState.slopeScale;
+	d.depthBiasClamp = s_encState.depthBiasClamp;
+	d.cullMode = (int8_t)s_encState.cullMode;
+	d.fillMode = (int8_t)s_encState.fillMode;
+	d.fragmentBuffer = s_encState.fragmentBuffer[0];
+	d.fragmentOffset = s_encState.fragmentOffset[0];
+	d.numTextures = 0;
+	for ( int i = 0; i < METAL_DEPTH_DRAW_TEXTURES; i++ ) {
+		d.texture[i] = s_encState.fragmentTexture[i];
+		d.sampler[i] = s_encState.fragmentSampler[i];
+		if ( d.texture[i] || d.sampler[i] ) {
+			d.numTextures = (uint8_t)( i + 1 );
+		}
+	}
+	d.indexed = indexed ? 1 : 0;
+	d.primitive = primitive;
+	d.indexType = indexType;
+	d.indexBuffer = indexBuffer;
+	d.first = first;
+	d.count = count;
+	s_depthDraws.push_back( d );
+}
+
+void GLMetal_DrawIndexed( NS::UInteger count, MTL::IndexType indexType, MTL::Buffer *indexBuffer, NS::UInteger indexOffset ) {
+	if ( !s_encoder ) {
+		return;
+	}
+	s_encoder->drawIndexedPrimitives( MTL::PrimitiveTypeTriangle, count, indexType, indexBuffer, indexOffset );
+	GLMetal_RecordDepthDraw( true, MTL::PrimitiveTypeTriangle, indexType, indexBuffer, indexOffset, count );
+}
+
+void GLMetal_Draw( MTL::PrimitiveType primitive, NS::UInteger first, NS::UInteger count ) {
+	if ( !s_encoder ) {
+		return;
+	}
+	s_encoder->drawPrimitives( primitive, first, count );
+	GLMetal_RecordDepthDraw( false, primitive, MTL::IndexTypeUInt16, nullptr, first, count );
+}
+
+// Draws the recorded depth writes into s_replayDepth with `cmd`.
+static bool GLMetal_ReplayDepthDraws( MTL::CommandBuffer *cmd ) {
+	MTL::RenderPassDescriptor *desc = MTL::RenderPassDescriptor::renderPassDescriptor();
+	desc->depthAttachment()->setTexture( s_replayDepth );
+	desc->depthAttachment()->setLoadAction( MTL::LoadActionClear );
+	desc->depthAttachment()->setClearDepth( 1.0 );
+	desc->depthAttachment()->setStoreAction( MTL::StoreActionStore );
+	desc->stencilAttachment()->setTexture( s_replayDepth );
+	desc->stencilAttachment()->setLoadAction( MTL::LoadActionClear );
+	desc->stencilAttachment()->setClearStencil( 0 );
+	desc->stencilAttachment()->setStoreAction( MTL::StoreActionDontCare );
+	MTL::RenderCommandEncoder *enc = cmd->renderCommandEncoder( desc );
+	if ( !enc ) {
+		return false;
+	}
+	enc->setFrontFacingWinding( MTL::WindingClockwise );
+	const MetalDepthDraw *last = nullptr;
+	for ( const MetalDepthDraw &d : s_depthDraws ) {
+		if ( !last || last->pipeline != d.pipeline ) {
+			enc->setRenderPipelineState( d.pipeline );
+		}
+		if ( !last || last->depthStencil != d.depthStencil ) {
+			enc->setDepthStencilState( d.depthStencil );
+		}
+		if ( !last || last->stencilRef != d.stencilRef ) {
+			enc->setStencilReferenceValue( d.stencilRef );
+		}
+		if ( !last || memcmp( &last->viewport, &d.viewport, sizeof( d.viewport ) ) != 0 ) {
+			enc->setViewport( d.viewport );
+		}
+		if ( !last || memcmp( &last->scissor, &d.scissor, sizeof( d.scissor ) ) != 0 ) {
+			enc->setScissorRect( d.scissor );
+		}
+		if ( !last || last->cullMode != d.cullMode ) {
+			enc->setCullMode( (MTL::CullMode)d.cullMode );
+		}
+		if ( !last || last->fillMode != d.fillMode ) {
+			enc->setTriangleFillMode( (MTL::TriangleFillMode)d.fillMode );
+		}
+		if ( !last || last->depthBias != d.depthBias || last->slopeScale != d.slopeScale || last->depthBiasClamp != d.depthBiasClamp ) {
+			enc->setDepthBias( d.depthBias, d.slopeScale, d.depthBiasClamp );
+		}
+		for ( int i = 0; i < d.numVertexBuffers; i++ ) {
+			if ( last && i < last->numVertexBuffers && last->vertexSlot[i] == d.vertexSlot[i] && last->vertexBuffer[i] == d.vertexBuffer[i] ) {
+				if ( last->vertexOffset[i] != d.vertexOffset[i] ) {
+					enc->setVertexBufferOffset( d.vertexOffset[i], d.vertexSlot[i] );
+				}
+			} else {
+				enc->setVertexBuffer( d.vertexBuffer[i], d.vertexOffset[i], d.vertexSlot[i] );
+			}
+		}
+		if ( d.fragmentBuffer ) {
+			if ( last && last->fragmentBuffer == d.fragmentBuffer ) {
+				if ( last->fragmentOffset != d.fragmentOffset ) {
+					enc->setFragmentBufferOffset( d.fragmentOffset, 0 );
+				}
+			} else {
+				enc->setFragmentBuffer( d.fragmentBuffer, d.fragmentOffset, 0 );
+			}
+		}
+		for ( int i = 0; i < d.numTextures; i++ ) {
+			if ( d.texture[i] && ( !last || last->texture[i] != d.texture[i] ) ) {
+				enc->setFragmentTexture( d.texture[i], (NS::UInteger)i );
+			}
+			if ( d.sampler[i] && ( !last || last->sampler[i] != d.sampler[i] ) ) {
+				enc->setFragmentSamplerState( d.sampler[i], (NS::UInteger)i );
+			}
+		}
+		if ( d.indexed ) {
+			enc->drawIndexedPrimitives( d.primitive, d.count, d.indexType, d.indexBuffer, d.first );
+		} else {
+			enc->drawPrimitives( d.primitive, d.first, d.count );
+		}
+		last = &d;
+	}
+	enc->endEncoding();
+	return true;
 }
 
 // ============================================================================
@@ -956,7 +1186,7 @@ static bool GLMetal_ClipToScene( int &srcX, int &srcY, int &width, int &height, 
 }
 
 void GLMetal_CopySceneToTexture( bool depth, int srcX, int srcY, int width, int height,
-								 MTL::Texture *dst, int dstX, int dstY ) {
+								 MTL::Texture *dst, int dstX, int dstY, bool replay ) {
 	if ( !dst || !s_sceneColor || !GLMetal_ClipToScene( srcX, srcY, width, height, dstX, dstY ) ) {
 		return;
 	}
@@ -969,6 +1199,31 @@ void GLMetal_CopySceneToTexture( bool depth, int srcX, int srcY, int width, int 
 	if ( width <= 0 || height <= 0 || dstX < 0 || dstY < 0 ) {
 		return;
 	}
+	const MTL::Origin srcOrigin = MTL::Origin::Make( (NS::UInteger)srcX, (NS::UInteger)srcY, 0 );
+	const MTL::Size size = MTL::Size::Make( (NS::UInteger)width, (NS::UInteger)height, 1 );
+	const MTL::Origin dstOrigin = MTL::Origin::Make( (NS::UInteger)dstX, (NS::UInteger)dstY, 0 );
+	if ( depth ) {
+		s_depthCopyFrame = s_frameSerial;
+	}
+	if ( depth && replay && GLMetal_CanReplayDepth() && s_replayDepth && s_queue ) {
+		// draw the depth buffer again instead of ending the scene pass to read it
+		const size_t bytes = (size_t)width * (size_t)height * 4;
+		if ( GLMetal_EnsureCaptureBuffer( (size_t)s_width * (size_t)s_height * 4 ) && bytes <= s_captureBufferSize ) {
+			GLMetal_FlushUploads( false );
+			MTL::CommandBuffer *pre = s_queue->commandBuffer();
+			if ( pre && GLMetal_ReplayDepthDraws( pre ) ) {
+				MTL::BlitCommandEncoder *blit = pre->blitCommandEncoder();
+				if ( blit ) {
+					blit->copyFromTexture( s_replayDepth, 0, 0, srcOrigin, size, s_captureBuffer, 0,
+										   (NS::UInteger)width * 4, (NS::UInteger)bytes, MTL::BlitOptionDepthFromDepthStencil );
+					blit->copyFromBuffer( s_captureBuffer, 0, (NS::UInteger)width * 4, (NS::UInteger)bytes, size, dst, 0, 0, dstOrigin );
+					blit->endEncoding();
+				}
+				pre->commit();
+				return;
+			}
+		}
+	}
 	MTL::CommandBuffer *cmd = GLMetal_CommandBufferForBlit();
 	if ( !cmd ) {
 		return;
@@ -977,9 +1232,6 @@ void GLMetal_CopySceneToTexture( bool depth, int srcX, int srcY, int width, int 
 	if ( !blit ) {
 		return;
 	}
-	const MTL::Origin srcOrigin = MTL::Origin::Make( (NS::UInteger)srcX, (NS::UInteger)srcY, 0 );
-	const MTL::Size size = MTL::Size::Make( (NS::UInteger)width, (NS::UInteger)height, 1 );
-	const MTL::Origin dstOrigin = MTL::Origin::Make( (NS::UInteger)dstX, (NS::UInteger)dstY, 0 );
 	if ( !depth ) {
 		blit->copyFromTexture( s_sceneColor, 0, 0, srcOrigin, size, dst, 0, 0, dstOrigin );
 	} else {
@@ -1001,6 +1253,9 @@ void GLMetal_FlushAndWait( void ) {
 	}
 	GLMetal_EndEncoderIfNeeded();
 	GLMetal_FlushUploads( false );
+	// the recorded depth draws use buffers and textures this command buffer kept alive
+	s_depthRecordValid = false;
+	s_depthDraws.clear();
 	s_cmdBuffer->commit();
 	s_cmdBuffer->waitUntilCompleted();
 	if ( s_cmdBuffer->status() == MTL::CommandBufferStatusError ) {
@@ -1086,6 +1341,10 @@ static bool GLMetal_EnsureSceneTargets( int width, int height ) {
 		s_sceneDepth->release();
 		s_sceneDepth = nullptr;
 	}
+	if ( s_replayDepth ) {
+		s_replayDepth->release();
+		s_replayDepth = nullptr;
+	}
 	if ( s_msaaColor ) {
 		s_msaaColor->release();
 		s_msaaColor = nullptr;
@@ -1101,6 +1360,7 @@ static bool GLMetal_EnsureSceneTargets( int width, int height ) {
 			MetalHost_Warning( "[Metal] failed to create %dx multisample targets", s_sampleCount );
 			return false;
 		}
+		s_replayDepth = GLMetal_NewTexture( MTL::TextureType2D, s_depthPixelFormat, width, height, 1, 1, true, 0 );
 	}
 	s_sceneColor = GLMetal_NewTexture( MTL::TextureType2D, s_colorPixelFormat, width, height, 1, 1, true, 0 );
 	s_sceneDepth = GLMetal_NewTexture( MTL::TextureType2D, s_depthPixelFormat, width, height, 1, 1, true, 0 );
@@ -1453,6 +1713,11 @@ bool GLMetal_BeginFrame( void ) {
 	s_frameCleared = false;
 	s_frameHasWork = false;
 	s_frameBegun = true;
+	// record depth writes while depth copies are being asked for
+	s_depthDraws.clear();
+	s_depthRecordValid = ( s_sampleCount > 1 && s_replayDepth && s_depthCopyFrame + 2 >= s_frameSerial && s_depthCopyFrame <= s_frameSerial
+						   && !MetalHost_CvarInt( "r_metalNoDepthReplay" ) );
+	s_depthCurKey.programId = -1;
 	return true;
 }
 

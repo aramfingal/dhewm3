@@ -16,6 +16,8 @@ idCVar r_metalNoPresent( "r_metalNoPresent", "0", CVAR_RENDERER | CVAR_BOOL,
 	"render but never present to the window (benchmarks, Metal backend)" );
 idCVar r_metalPresentHz( "r_metalPresentHz", "-1", CVAR_RENDERER | CVAR_ARCHIVE | CVAR_INTEGER,
 	"with r_swapInterval 0, presents per second: -1 = display refresh rate, 0 = every frame, N = at most N (Metal backend)" );
+idCVar r_metalNoDepthReplay( "r_metalNoDepthReplay", "0", CVAR_RENDERER | CVAR_BOOL,
+	"with multisampling, end the scene pass for a depth copy (soft particles) instead of drawing the depth buffer again; for comparison" );
 idCVar r_metalHidden( "r_metalHidden", "0", CVAR_RENDERER | CVAR_BOOL | CVAR_INIT,
 	"never show the window and never present (automated runs, Metal backend)" );
 idCVar r_metalDebug( "r_metalDebug", "0", CVAR_RENDERER | CVAR_INTEGER,

@@ -109,4 +109,5 @@ Debugging: `r_metalDebug 1` prints every shader pair compiled, `2` also writes i
 `/tmp/mgl_pair_*.metal` (compile one with
 `xcrun -sdk macosx metal -std=metal3.0 -c file.metal -o /dev/null`). A pair that fails to
 compile is written to `/tmp/mgl_failed_*.metal` and draws nothing. `r_metalFrameStats N`
-prints frame timing. Cvars: `r_metalHidden`, `r_metalNoPresent`, `r_metalPresentHz`.
+prints frame timing. Cvars: `r_metalHidden`, `r_metalNoPresent`, `r_metalPresentHz`,
+`r_metalNoDepthReplay` (depth copies with multisampling, see DESIGN.md).

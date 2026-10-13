@@ -119,6 +119,15 @@ in alphalabs1 and erebus1, and the two renderers' images match.
 
 Not verified: by a person in play; the light is not saved in savegames (off after loading).
 
+## Soft particles with multisampling (Metal)
+
+A reported dip to 150 fps (alphalabs1, steam, 2560x1440, 8x MSAA) was the depth copy that
+soft particles need: it ended the multisampled scene pass. The depth buffer is now drawn
+again into a single-sample target instead (docs/metal/DESIGN.md, "Depth copies with
+multisampling"). Measured from the owner's save, hidden window, not presenting: 152 -> 338
+fps at that spot, 527 -> 1026 fps with no particles in view; OpenGL gives 114 there. Harness
+at 8x MSAA (views, special, settings) passes with and without the replay and the two match.
+
 ## Next
 
 - FOLLOWUPS.md: a visible-window test, a harness scenario for subviews and post-process
