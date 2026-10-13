@@ -908,7 +908,7 @@ doom set test blah + map test
 ============================================================================
 */
 
-#define		MAX_CONSOLE_LINES	32
+#define		MAX_CONSOLE_LINES	256		// was 32, with nothing that kept a longer command line from writing past the array
 int			com_numConsoleLines;
 idCmdArgs	com_consoleLines[MAX_CONSOLE_LINES];
 
@@ -924,6 +924,10 @@ void idCommonLocal::ParseCommandLine( int argc, char **argv ) {
 	// API says no program path
 	for ( i = 0; i < argc; i++ ) {
 		if ( argv[ i ][ 0 ] == '+' ) {
+			if ( com_numConsoleLines >= MAX_CONSOLE_LINES ) {
+				// too early to print: the rest of the command line is dropped
+				break;
+			}
 			com_numConsoleLines++;
 			com_consoleLines[ com_numConsoleLines-1 ].AppendArg( argv[ i ] + 1 );
 		} else {

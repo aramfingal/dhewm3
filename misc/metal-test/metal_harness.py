@@ -91,6 +91,7 @@ PROBLEM_PATTERNS = [
 
 BACKGROUND = True   # the game never comes to the front (--foreground turns this off)
 EXTRA_CVARS = {}     # --set NAME VALUE: cvars added to every launch
+FS_GAME = None       # --fs-game NAME: run a mod folder
 
 
 def log(msg):
@@ -715,6 +716,14 @@ def new_crash_reports(since):
 
 
 def launch(binary, renderer, data, home, res, game, cvars, cfg_text, outdir, timeout, env=None):
+    # --fs-game: a mod folder (and the game folder it is based on) instead of base / d3xp;
+    # the game then writes its screenshots into the mod's folder
+    if FS_GAME:
+        cvars = dict(cvars, fs_game=FS_GAME if game == "base" else game)
+        if game != "base":
+            cvars["fs_game_base"] = FS_GAME
+        else:
+            game = FS_GAME
     gamedir = os.path.join(home, game)
     os.makedirs(gamedir, exist_ok=True)
     os.makedirs(outdir, exist_ok=True)
@@ -749,7 +758,7 @@ def launch(binary, renderer, data, home, res, game, cvars, cfg_text, outdir, tim
                 proc.kill()
                 proc.wait()
     return {"exit_code": proc.returncode, "timed_out": timed_out,
-            "duration_s": round(time.time() - start, 1), "started": start}
+            "duration_s": round(time.time() - start, 1), "started": start, "gamedir": gamedir}
 
 
 def run_scenario(args, label_dir, scen, binary, renderer):
@@ -762,7 +771,7 @@ def run_scenario(args, label_dir, scen, binary, renderer):
     os.makedirs(home)
     res = launch(binary, renderer, args.data, home, args.res, scen["game"], scen.get("cvars", {}),
                  scen["cfg"], outdir, scen.get("timeout", args.timeout), scen.get("env"))
-    gamedir = os.path.join(home, scen["game"])
+    gamedir = res["gamedir"]
     reasons = []
     status = "PASS"
     if res["timed_out"]:
@@ -997,7 +1006,8 @@ def cmd_build(args):
 
 
 def common_setup(args):
-    global BACKGROUND, EXTRA_CVARS
+    global BACKGROUND, EXTRA_CVARS, FS_GAME
+    FS_GAME = args.fs_game
     BACKGROUND = not args.foreground
     EXTRA_CVARS = {k: v for k, v in (args.set or [])}
     args.data = os.path.abspath(os.path.expanduser(args.data))
@@ -1061,6 +1071,7 @@ def main():
         sp.add_argument("--foreground", action="store_true",
                         help="let the game window come to the front and take focus")
         sp.add_argument("--keep-home", action="store_true")
+        sp.add_argument("--fs-game", help="mod folder to run (fs_game; for d3xp scenarios fs_game_base)")
         sp.add_argument("--set", nargs=2, action="append", metavar=("NAME", "VALUE"))
 
     r = sub.add_parser("run")

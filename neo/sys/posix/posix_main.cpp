@@ -738,6 +738,13 @@ static void signalhandlerCrash(int sig)
 		//       consoleLog = NULL;
 	}
 
+	// automated runs (misc/metal-test, SDL_MAC_BACKGROUND_APP): the backtrace above is all
+	// the harness needs. Passing the signal on makes macOS show its crash dialog to
+	// whoever is using the machine.
+	if ( getenv( "SDL_MAC_BACKGROUND_APP" ) ) {
+		_exit( 128 + sig );
+	}
+
 	raise(sig); // pass it on to system
 }
 

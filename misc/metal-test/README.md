@@ -97,5 +97,6 @@ build of the same renderer are FAIL.
 | `--validation` | add the Metal API validation scenario |
 | `--foreground` | show the game window |
 | `--set NAME VALUE` | set a cvar in every launch (repeatable) |
+| `--fs-game NAME` | run a mod folder (`fs_game NAME`; for d3xp scenarios `fs_game_base NAME`) |
 | `--keep-home` | keep each launch's throwaway home folder |
 | `--timeout N` | seconds per launch (default 300) |

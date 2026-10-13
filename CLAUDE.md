@@ -52,8 +52,22 @@ code) are in `build/`. Run it with
   `shots/demo_<frame>.tga` at exactly those demo frames (`neo/framework/Session.cpp`).
 - `wait N` counts frames (or game tics with `com_smoothFrames`), not command buffer runs.
 - `com_printFPS N` prints the average frame rate every N frames.
+- More than 32 `+command` arguments no longer overflow `com_consoleLines` (a crash at
+  start-up in stock dhewm3); the limit is 256.
+- With `SDL_MAC_BACKGROUND_APP` a crash exits after printing its backtrace instead of
+  raising the signal again, so test runs never bring up the macOS crash dialog.
 - `SDL_MAC_BACKGROUND_APP` handling (above).
 - arm64 macOS deployment target raised from 10.7 to 11.0 (`neo/CMakeLists.txt`).
+
+## HD texture packs
+
+Two packs are installed outside the repo and the game data, in
+`~/Library/Application Support/dhewm3-packs/` (`d3hdp`, `hidef2k`). `misc/doom3.sh
+[d3hdp|hidef2k|vanilla] [roe]` starts the game with one of them through `fs_devpath`; never
+load both. The harness does not see them unless told to (`--set fs_devpath <folder>`, and
+`--fs-game hidef2k` for the Hi-Def 2K mod). Hi-Def 2K's own lighting program reads values
+its vertex program never writes, so Metal and OpenGL differ by a few percent of pixels with
+it; that is the pack, not the backend.
 
 ## Frame rate
 
