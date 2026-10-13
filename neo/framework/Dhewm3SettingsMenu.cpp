@@ -1650,6 +1650,8 @@ static CVarOption videoOptionsImmediately[] = {
 		}
 		AddCVarOptionTooltips( cvar, descr );
 	} ),
+	CVarOption( "com_smoothFrames", "Frame rate not limited to 60 (interpolate between game tics)", OT_BOOL ),
+	CVarOption( "com_maxFPS", "Frame rate limit (0 = none)", OT_INT, 0, 1000 ),
 	CVarOption( "r_windowResizable", "Make dhewm3 window resizable", OT_BOOL ),
 	CVarOption( "r_brightness", "Brightness", OT_FLOAT, 0.5f, 2.0f ),
 	CVarOption( "r_gamma", "Gamma", OT_FLOAT, 0.5f, 3.0f ),

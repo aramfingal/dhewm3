@@ -263,6 +263,35 @@ idCommon *		common = &commonLocal;
 
 static double nextTicTime = 0.0;
 
+idCVar com_smoothFrames( "com_smoothFrames", "1", CVAR_SYSTEM | CVAR_BOOL | CVAR_ARCHIVE,
+	"draw as many frames as possible instead of one per game tic (60 per second): the game still runs 60 tics per second, and frames in between show the world interpolated between two tics. 0 = one frame per tic, as before" );
+idCVar com_maxFPS( "com_maxFPS", "0", CVAR_SYSTEM | CVAR_INTEGER | CVAR_ARCHIVE,
+	"with com_smoothFrames: limit the frame rate to this many frames per second, 0 = no limit (vsync still applies)" );
+
+idCVar com_printFPS( "com_printFPS", "0", CVAR_SYSTEM | CVAR_INTEGER,
+	"every N frames, print the average frame rate of those frames to the console (0 = off)" );
+
+// set by the session every frame: frames are not tied to game tics right now
+bool com_smoothFramesActive = false;
+
+// length of one tic in (real) milliseconds
+static double Com_TicLengthMS() {
+	const float timescale = com_timescale.GetFloat();
+	return ( timescale == 1.0f || timescale <= 0.0f ) ? com_preciseFrameLengthMS : com_preciseFrameLengthMS / timescale;
+}
+
+// the (real) time at which the current tic began, as Sys_MillisecondsPrecise()
+double Com_CurrentTicStartMS() {
+	return nextTicTime - Com_TicLengthMS();
+}
+
+// how far into the tic that began at ticStartMS we are: 0 at its start, 1 one tic later
+// (and then it stays 1)
+float Com_TicFraction( double ticStartMS ) {
+	const double f = ( Sys_MillisecondsPrecise() - ticStartMS ) / Com_TicLengthMS();
+	return ( f < 0.0 ) ? 0.0f : ( ( f > 1.0 ) ? 1.0f : (float)f );
+}
+
 // DG: updates the tic number based on the (real) time expired since it has last been updated
 void Com_UpdateTicNumber() {
 	D3P_CPUSampleFn();
@@ -303,7 +332,12 @@ void Com_UpdateFrameTime() {
 	int ticDiff = ticNum - lastTicNum;
 
 	com_preciseFrameTimeMS += ticDiff * com_preciseFrameLengthMS;
-	com_frameTime = idMath::Rint( com_preciseFrameTimeMS );
+	if ( com_smoothFramesActive ) {
+		// frames are drawn between tics: let the frame time (GUIs, the console) move with them
+		com_frameTime = idMath::Rint( com_preciseFrameTimeMS + Com_TicFraction( Com_CurrentTicStartMS() ) * com_preciseFrameLengthMS );
+	} else {
+		com_frameTime = idMath::Rint( com_preciseFrameTimeMS );
+	}
 
 	lastTicNum = ticNum;
 }
@@ -2524,6 +2558,8 @@ void idCommonLocal::Frame( void ) {
 
 		idAsyncNetwork::RunFrame();
 
+		com_smoothFramesActive = false;	// the session decides, if it runs the frame
+
 		if ( idAsyncNetwork::IsActive() ) {
 			if ( idAsyncNetwork::serverDedicated.GetInteger() != 1 ) {
 				session->GuiFrameEvents();
@@ -2549,6 +2585,19 @@ void idCommonLocal::Frame( void ) {
 
 		com_frameNumber++;
 
+		if ( com_printFPS.GetInteger() > 0 ) {
+			static int frames = 0;
+			static double startMS = 0.0;
+			if ( ++frames >= com_printFPS.GetInteger() ) {
+				const double now = Sys_MillisecondsPrecise();
+				if ( startMS > 0.0 && now > startMS ) {
+					Printf( "fps: %.1f (%d frames in %.0f ms, tic %d)\n", frames * 1000.0 / ( now - startMS ), frames, now - startMS, (int)com_ticNumber );
+				}
+				frames = 0;
+				startMS = now;
+			}
+		}
+
 		// set idLib frame number for frame based memory dumps
 		idLib::frameNumber = com_frameNumber;
 
@@ -2560,7 +2609,22 @@ void idCommonLocal::Frame( void ) {
 		if ( com_editors == 0 )
 #endif
 		{
-			if ( com_timescale.GetFloat() == 1.0f && GLimp_GetSwapInterval() != 0
+			if ( com_smoothFramesActive ) {
+				// frames are not tied to tics: start the next one at once, or when
+				// com_maxFPS allows it
+				static double nextFrameTime = 0.0;
+				const int maxFPS = com_maxFPS.GetInteger();
+				if ( maxFPS > 0 ) {
+					const double now = Sys_MillisecondsPrecise();
+					nextFrameTime += 1000.0 / maxFPS;
+					if ( nextFrameTime <= now || nextFrameTime > now + 1000.0 ) {
+						nextFrameTime = now;	// this frame took longer than that, or the limit changed
+					} else {
+						Sys_SleepUntilPrecise( nextFrameTime );
+					}
+				}
+			}
+			else if ( com_timescale.GetFloat() == 1.0f && GLimp_GetSwapInterval() != 0
 				&& fabsf(60.0f - GLimp_GetDisplayRefresh()) < 1.0f ) {
 				// if we're using vsync and the display is running at about 60Hz, start next tic
 				// immediately so our internal tic time and vsync don't drift apart

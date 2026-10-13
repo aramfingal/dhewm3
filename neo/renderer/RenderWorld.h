@@ -430,4 +430,12 @@ public:
 	virtual void			DrawText( const char *text, const idVec3 &origin, float scale, const idVec4 &color, const idMat3 &viewAxis, const int align = 1, const int lifetime = 0, bool depthTest = false ) = 0;
 };
 
+// Frame interpolation between game tics (RenderWorld_interp.cpp), driven by the session:
+// BeginTic before every game tic, SetFrame before every frame is drawn.
+void R_FrameInterpolation_BeginTic( idRenderWorld *world );
+// lookPitch / lookYaw: how far the input has turned since the latest game tic;
+// ticLookPitch / ticLookYaw: how far it turned between the two latest game tics
+void R_FrameInterpolation_SetFrame( idRenderWorld *world, bool enabled, float alpha, bool directLook,
+									float lookPitch, float lookYaw, float ticLookPitch, float ticLookYaw );
+
 #endif /* !__RENDERWORLD_H__ */

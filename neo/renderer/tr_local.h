@@ -182,8 +182,22 @@ public:
 };
 
 
+// Frame interpolation (RenderWorld_interp.cpp): the game moves entities and lights once
+// per game tic; frames rendered between two tics show them in between.
+typedef struct frameInterp_s {
+	bool					valid;			// gameOrigin / gameAxis have been set
+	bool					applied;		// parms hold a transform other than the game's
+	int						tic;			// game tic in which the game last moved it
+	idVec3					gameOrigin;		// what the game set last
+	idMat3					gameAxis;
+	idVec3					fromOrigin;		// what it was before that tic
+	idMat3					fromAxis;
+} frameInterp_t;
+
 class idRenderLightLocal : public idRenderLight {
 public:
+	frameInterp_t			interp;
+
 							idRenderLightLocal();
 
 	virtual void			FreeRenderLight();
@@ -240,6 +254,18 @@ public:
 
 class idRenderEntityLocal : public idRenderEntity {
 public:
+	virtual					~idRenderEntityLocal();
+
+	frameInterp_t			interp;
+
+	// frame interpolation of the skeleton (R_InterpJoints)
+	idJointMat *			interpJoints;			// three poses: after the previous tic, after the latest, in between
+	int						interpNumJoints;
+	int						interpJointsTic;		// game tic of the latest pose
+	int						interpJointsFrame;		// renderer frame that last asked
+	bool					interpJointsMoving;		// the two poses differ
+	bool					interpJointsApplied;	// the dynamic model was made from the pose in between
+
 							idRenderEntityLocal();
 
 	virtual void			FreeRenderEntity();
@@ -1227,6 +1253,7 @@ void R_FreeDerivedData( void );
 void R_ReCreateWorldReferences( void );
 
 void R_CreateEntityRefs( idRenderEntityLocal *def );
+const idJointMat *R_InterpJoints( idRenderEntityLocal *def, bool &rebuild );
 void R_CreateLightRefs( idRenderLightLocal *light );
 
 void R_DeriveLightData( idRenderLightLocal *light );

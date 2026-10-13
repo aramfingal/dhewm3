@@ -54,3 +54,31 @@ Each item: where, approach, risk, how to verify.
     translate; whether they look right is unverified. Approach: a d3xp view with the
     artifact active (needs `give` and `impulse` commands in the script), and one view per
     `r_show*` cvar compared against OpenGL.
+
+## Frame rate (`docs/FRAMERATE.md`)
+
+11. **Never played by a person.** Everything was verified with scripted runs in a hidden
+    window. Check mouse feel (`com_smoothFramesDirectLook 0/1`), `r_swapInterval 1` on a
+    120 Hz display, weapon and flashlight when turning fast, GUIs, cinematics, saving and
+    loading, d3xp (grabber, mounted guns, slow motion artifact).
+12. **HUD and in-world GUIs change at 60 Hz.** They are drawn every frame but with the game
+    time of the latest tic (`hud->Redraw( gameLocal.realClientTime )` in the game code).
+    Approach: pass an interpolated time from the game's draw code. Risk: GUI scripts that
+    compare times. The GUI cursor on in-world screens therefore trails a directly turned
+    view by up to a tic.
+13. **View kick, bob and shake under direct look** are interpolated as "what the game adds
+    to the input" (`InterpView`), which has only been checked for not disturbing the
+    existing tests: no scripted test fires a weapon. Check by eye that recoil is smooth and
+    the view does not wobble at the pitch limits.
+14. **Not interpolated:** shader parms (light colour flicker, beam end points), entity
+    bounds, the sound listener. A beam's start is interpolated and its end is not.
+15. **Lights that move are re-derived every frame** (`R_InterpSetLightTransform`), as they
+    were once per tic before. With many moving lights at very high frame rates this is the
+    largest cost of interpolation (alphalabs1: 3,250 fps without skeleton interpolation,
+    2,780 with; erebus1 2,100 and 1,900).
+16. **Multiplayer is still one frame per tic**: the client's prediction loop
+    (`neo/framework/async/AsyncClient.cpp`) would need the same treatment.
+17. **Upstream's `com_gameHz` branch** (`upstream/kickstart-my-hertz`, 34 commits) would
+    lower the one tic of display latency by running the game faster; it changes physics.
+    It can be merged on top of this: the interpolation code does not assume 60 Hz except
+    in `wait` and `com_preciseFrameLengthMS`.

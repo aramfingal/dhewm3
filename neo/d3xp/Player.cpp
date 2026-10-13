@@ -5953,6 +5953,14 @@ void idPlayer::UpdateViewAngles( void ) {
 
 	UpdateDeltaViewAngles( viewAngles );
 
+	// tell the engine that the view of the local player turns with the input one to one,
+	// so that frames drawn between two game frames can turn it right away
+	// (com_smoothFrames; the engine clears the cvar before every game frame)
+	if ( gameLocal.GetLocalPlayer() == this && !gameLocal.isMultiplayer && !pm_thirdPerson.GetBool()
+		 && influenceActive == 0 && centerView.IsDone( gameLocal.time ) && !spectating && !mountedObject ) {
+		cvarSystem->SetCVarBool( "com_viewFollowsInput", true );
+	}
+
 	// orient the model towards the direction we're looking
 	SetAngles( idAngles( 0, viewAngles.yaw, 0 ) );
 

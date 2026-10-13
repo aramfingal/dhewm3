@@ -81,6 +81,34 @@ Not verified:
 - Remote camera GUIs, the d3xp post-process materials (blood orb, enviro suit) and the
   debug tools (`r_show*`) go through the same GL layer but no harness scenario looks at them.
 
+## Frame rate independent of the game tic (branch `uncapped-fps`, on top of `metal-renderer`)
+
+Design and cvars: `docs/FRAMERATE.md`. The game still runs 60 tics per second; frames are
+drawn as fast as possible and show entities, lights, skeletons and the view interpolated
+between the last two tics, with mouse look applied in every frame.
+
+Verified with the harness (M5 Max, 1280x720, hidden window, 2026-10-13):
+- Frame rate in maps with `com_smoothFrames 1`, no limit: Metal 1,900-3,400 fps, OpenGL
+  330-470 fps (alphalabs1, the mars_city1 intro, d3xp erebus1). Before: 60.
+- `smooth_base_alphalabs1` (both renderers, three runs each): a frame half way between two
+  tics equals a frame taken from half way; alpha 0 equals the tic before; a view turned 10
+  degrees by pending input equals really facing there, first person weapon included.
+- `smooth_intro_base_mars_city1`: during the opening cinematic an alpha 0 frame reproduces
+  the frame of the tic before (differences only in GUI screens, which run per tic).
+- Camera path in the intro at 240 fps (`r_interpolateLog`): the camera advances every frame
+  in proportion to the time passed, across tic boundaries; 2,569 moving frames, no backward
+  step, one outlier (a camera cut).
+- In play, every frame interpolates entities (up to 49), lights (up to 7) and the skeletons
+  in view (counts from `r_interpolateLog`).
+- `com_maxFPS 240` gives 4.0 frames per tic.
+- The whole earlier suite still passes with both renderers, and with `wait` counting frames
+  the frozen views became repeatable: no image differs between Metal and OpenGL in more
+  than 0.05% of pixels.
+
+Not verified (needs a person at the screen): how it feels, i.e. mouse look with direct look
+on and off, vsync at the display's refresh rate, a long play session. Multiplayer is
+unchanged and still tied to tics.
+
 ## Next
 
 - FOLLOWUPS.md: a visible-window test, a harness scenario for subviews and post-process

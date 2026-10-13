@@ -50,8 +50,19 @@ code) are in `build/`. Run it with
   (`neo/framework/Common.cpp`), so `timeDemo` measures the renderer instead of the tic rate.
 - `com_demoShotFrames "150 400 ..."`: while a render demo plays, writes
   `shots/demo_<frame>.tga` at exactly those demo frames (`neo/framework/Session.cpp`).
+- `wait N` counts frames (or game tics with `com_smoothFrames`), not command buffer runs.
+- `com_printFPS N` prints the average frame rate every N frames.
 - `SDL_MAC_BACKGROUND_APP` handling (above).
 - arm64 macOS deployment target raised from 10.7 to 11.0 (`neo/CMakeLists.txt`).
+
+## Frame rate
+
+The game runs 60 tics per second; frames are not tied to tics (`com_smoothFrames 1`, the
+default) and show the world interpolated between the last two tics. Read `docs/FRAMERATE.md`
+before touching `neo/renderer/RenderWorld_interp.cpp`, the tic loop in
+`neo/framework/Session.cpp` (`idSessionLocal::Frame`, `Draw`) or frame pacing in
+`neo/framework/Common.cpp`. The harness scenarios `smooth_*` and `uncapped_*` test it; the
+image scenarios run with `com_fixedTic 1`, which ties frames to tics as before.
 
 ## Architecture
 

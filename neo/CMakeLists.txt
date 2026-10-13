@@ -647,6 +647,7 @@ set(src_renderer
 	renderer/RenderWorld_demo.cpp
 	renderer/RenderWorld_load.cpp
 	renderer/RenderWorld_portals.cpp
+	renderer/RenderWorld_interp.cpp
 	renderer/VertexCache.cpp
 	renderer/draw_arb2.cpp
 	renderer/draw_common.cpp

@@ -76,7 +76,7 @@ public:
 	virtual void			SetupReloadEngine( const idCmdArgs &args );
 	virtual bool			PostReloadEngine( void );
 
-	void					SetWait( int numFrames ) { wait = numFrames; }
+	void					SetWait( int numFrames );
 	commandDef_t *			GetCommands( void ) const { return commands; }
 
 private:
@@ -85,6 +85,8 @@ private:
 	commandDef_t *			commands;
 
 	int						wait;
+	int						waitFrame;			// com_frameNumber at which the wait is over
+	int						waitTic;			// com_ticNumber at which the wait is over
 	int						textLength;
 	byte					textBuf[MAX_CMD_BUFFER];
 
@@ -293,6 +295,26 @@ idCmdSystemLocal::Wait_f
 Causes execution of the remainder of the command buffer to be delayed until next frame.
 ============
 */
+extern bool com_smoothFramesActive;
+extern int com_frameNumber;
+
+/*
+============
+idCmdSystemLocal::SetWait
+
+"wait n" delays the commands after it by n frames. It used to count calls of
+ExecuteCommandBuffer, which is called once per frame but also once per input event, so a
+wait was shorter while the mouse moved. With com_smoothFrames a frame can be any length,
+so there a wait counts game tics (sixtieths of a second) instead, as it always did in
+effect.
+============
+*/
+void idCmdSystemLocal::SetWait( int numFrames ) {
+	wait = numFrames;
+	waitFrame = com_frameNumber + numFrames;
+	waitTic = com_ticNumber + numFrames;
+}
+
 void idCmdSystemLocal::Wait_f( const idCmdArgs &args ) {
 	if ( args.Argc() == 2 ) {
 		cmdSystemLocal.SetWait( atoi( args.Argv( 1 ) ) );
@@ -633,9 +655,11 @@ void idCmdSystemLocal::ExecuteCommandBuffer( void ) {
 	while( textLength ) {
 
 		if ( wait )	{
-			// skip out while text still remains in buffer, leaving it for next frame
-			wait--;
-			break;
+			// skip out while text still remains in buffer, leaving it for a later frame
+			if ( com_smoothFramesActive ? ( com_ticNumber < waitTic ) : ( com_frameNumber < waitFrame ) ) {
+				break;
+			}
+			wait = 0;
 		}
 
 		// find a \n or ; line break
