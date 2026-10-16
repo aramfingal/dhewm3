@@ -218,6 +218,10 @@ static void CustomApplicationMain (int argc, char **argv)
     /* Ensure the application object is initialised */
     [NSApplication sharedApplication];
 
+    /* automated runs (misc/metal-test): no Dock icon, never becomes the active app */
+    if (getenv("SDL_MAC_BACKGROUND_APP"))
+        [NSApp setActivationPolicy:NSApplicationActivationPolicyProhibited];
+
 #ifdef SDL_USE_CPS
     {
         CPSProcessSerNum PSN;

@@ -59,6 +59,7 @@ option(ONATIVE		"Optimize for the host CPU" OFF)
 option(SDL2			"Use SDL2 instead of SDL1.2" ON)
 option(SDL3			"Use SDL3 instead of SDL2 or SDL1.2" OFF)
 option(IMGUI		"Build with Dear ImGui integration - requires SDL2/SDL3 and C++11" ON)
+option(METAL		"Build the Metal rendering backend (macOS with SDL2; selected at runtime with r_backend metal)" ${APPLE})
 option(REPRODUCIBLE_BUILD "Replace __DATE__ and __TIME__ by hardcoded values for reproducible builds" OFF)
 
 option(TRACY		"Build and integrate the Tracy profiler, requires HARDLINK_GAME" OFF)
@@ -473,8 +474,8 @@ if(D3_COMPILER_IS_GCC_OR_CLANG)
 			add_compile_options(-arch x86_64 -mmacosx-version-min=10.7)
 			set(ldflags "${ldflags} -arch x86_64 -mmacosx-version-min=10.7")
 		elseif(cpu STREQUAL "arm64")
-			add_compile_options(-arch arm64 -mmacosx-version-min=10.7)
-			set(ldflags "${ldflags} -arch arm64 -mmacosx-version-min=10.7")
+			add_compile_options(-arch arm64 -mmacosx-version-min=11.0)
+			set(ldflags "${ldflags} -arch arm64 -mmacosx-version-min=11.0")
 		elseif(cpu STREQUAL "x86")
 			CHECK_CXX_COMPILER_FLAG("-arch i386" cxx_has_arch_i386)
 			if(cxx_has_arch_i386)
@@ -682,6 +683,26 @@ function(add_globbed_headers SRCLIST PATHPREFIX)
 endfunction()
 
 add_globbed_headers(src_renderer "renderer")
+
+# Metal backend: renderer/metal/*.cpp are C++17 (metal-cpp) and do not include engine
+# headers, except metal_host.cpp, the bridge to the engine.
+set(src_renderer_metal
+	renderer/metal/metal_device.cpp
+	renderer/metal/mgl.cpp
+	renderer/metal/mgl_arb.cpp
+	renderer/metal/mgl_shader.cpp
+)
+if(METAL AND APPLE AND SDL2 AND NOT SDL3)
+	set(src_renderer ${src_renderer} ${src_renderer_metal} renderer/metal/metal_host.cpp)
+	set_source_files_properties(${src_renderer_metal} PROPERTIES
+		COMPILE_FLAGS "-std=c++17 -Wno-deprecated-declarations"
+		INCLUDE_DIRECTORIES "${CMAKE_SOURCE_DIR}/libs/metal-cpp")
+	add_definitions(-DD3_METAL=1)
+	set(metal_libs "-framework Metal" "-framework QuartzCore" "-framework Foundation" "-framework CoreGraphics")
+	message(STATUS "Metal backend enabled (r_backend metal)")
+else()
+	set(metal_libs "")
+endif()
 
 set(src_framework
 	framework/CVarSystem.cpp
@@ -1350,6 +1371,7 @@ endif()
 		${CURL_LIBRARY}
 		${SDLx_LIBRARY}
 		${sys_libs}
+		${metal_libs}
 	)
 
 	if(NOT APPLE AND NOT WIN32)

@@ -48,6 +48,7 @@ If you have questions concerning this license or the applicable additional terms
 idCVar	idSessionLocal::com_showAngles( "com_showAngles", "0", CVAR_SYSTEM | CVAR_BOOL, "" );
 idCVar	idSessionLocal::com_minTics( "com_minTics", "1", CVAR_SYSTEM, "" );
 idCVar	idSessionLocal::com_showTics( "com_showTics", "0", CVAR_SYSTEM | CVAR_BOOL, "" );
+static idCVar com_demoShotFrames( "com_demoShotFrames", "", CVAR_SYSTEM, "space separated render demo frame numbers; when one is reached a screenshot is written to shots/demo_<frame>.tga" );
 idCVar	idSessionLocal::com_fixedTic( "com_fixedTic", "0", CVAR_SYSTEM | CVAR_INTEGER | CVAR_ARCHIVE, "", -1, 10 );
 idCVar	idSessionLocal::com_showDemo( "com_showDemo", "0", CVAR_SYSTEM | CVAR_BOOL, "" );
 idCVar	idSessionLocal::com_skipGameDraw( "com_skipGameDraw", "0", CVAR_SYSTEM | CVAR_BOOL, "" );
@@ -692,6 +693,20 @@ Session_TimeDemo_f
 static void Session_TimeDemo_f( const idCmdArgs &args ) {
 	if ( args.Argc() >= 2 ) {
 		sessLocal.TimeRenderDemo( va( "demos/%s", args.Argv(1) ), ( args.Argc() > 2 ) );
+	}
+}
+
+/*
+================
+Session_SkipCinematic_f
+
+Same as pressing escape during a cinematic. For scripted test runs (misc/metal-test).
+================
+*/
+static void Session_SkipCinematic_f( const idCmdArgs &args ) {
+	if ( sessLocal.mapSpawned && game ) {
+		idUserInterface *gui = NULL;
+		game->HandleESC( &gui );
 	}
 }
 
@@ -2403,6 +2418,14 @@ void idSessionLocal::AdvanceRenderDemo( bool singleFrameOnly ) {
 				// a view is ready to render
 				skipFrames--;
 				numDemoFrames++;
+				// test runs (misc/metal-test): screenshots of exact demo frames
+				const char *shotFrames = com_demoShotFrames.GetString();
+				if ( shotFrames[0] ) {
+					idStr list = va( " %s ", shotFrames );
+					if ( list.Find( va( " %i ", numDemoFrames ) ) != -1 ) {
+						cmdSystem->BufferCommandText( CMD_EXEC_APPEND, va( "screenshot shots/demo_%05i.tga\n", numDemoFrames ) );
+					}
+				}
 			}
 			continue;
 		}
@@ -2991,6 +3014,7 @@ void idSessionLocal::Init() {
 	cmdSystem->AddCommand( "stopRecording", Session_StopRecordingDemo_f, CMD_FL_SYSTEM, "stops demo recording" );
 	cmdSystem->AddCommand( "playDemo", Session_PlayDemo_f, CMD_FL_SYSTEM, "plays back a demo", idCmdSystem::ArgCompletion_DemoName );
 	cmdSystem->AddCommand( "timeDemo", Session_TimeDemo_f, CMD_FL_SYSTEM, "times a demo", idCmdSystem::ArgCompletion_DemoName );
+	cmdSystem->AddCommand( "skipCinematic", Session_SkipCinematic_f, CMD_FL_SYSTEM, "skips the cinematic that is playing" );
 	cmdSystem->AddCommand( "timeDemoQuit", Session_TimeDemoQuit_f, CMD_FL_SYSTEM, "times a demo and quits", idCmdSystem::ArgCompletion_DemoName );
 	cmdSystem->AddCommand( "aviDemo", Session_AVIDemo_f, CMD_FL_SYSTEM, "writes AVIs for a demo", idCmdSystem::ArgCompletion_DemoName );
 	cmdSystem->AddCommand( "compressDemo", Session_CompressDemo_f, CMD_FL_SYSTEM, "compresses a demo file", idCmdSystem::ArgCompletion_DemoName );

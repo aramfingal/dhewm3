@@ -217,7 +217,10 @@ int SDL_main( int argc, char *argv[] ) {
 	else
 		common->Init(0, NULL);
 
-	[NSApp activateIgnoringOtherApps:YES];
+	// automated runs (misc/metal-test) set SDL_MAC_BACKGROUND_APP so the game neither
+	// comes to the front nor takes keyboard focus
+	if (!getenv("SDL_MAC_BACKGROUND_APP"))
+		[NSApp activateIgnoringOtherApps:YES];
 
 	while (1) {
 		common->Frame();
