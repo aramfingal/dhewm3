@@ -1003,6 +1003,17 @@ static bool s_layerActive = false;
 static bool s_layerFlushing = false;
 static uint64_t s_depthReplayFrame = ~0ull;	// the last frame whose depth copy was made by replay
 static MTL::RenderPipelineState *s_layerCompositePipeline = nullptr;
+static MTL::RenderPipelineState *s_layerCompositeDepthPipeline = nullptr;
+
+// The scene depth the layer is upsampled against: the last depth copy of the frame (the
+// texture the soft particles read), the part of the scene it covers and where that is in it.
+struct MetalLayerDepth {
+	MTL::Texture *tex;
+	int x, y, width, height;	// scene pixels
+	int offsetX, offsetY;		// texel = scene pixel + offset
+};
+static MetalLayerDepth s_lastDepthCopy;		// tex null: none this frame
+static MetalLayerDepth s_layerGroupDepth;	// of the group being collected
 
 static const char *kLayerCompositeMSL =
 	"#include <metal_stdlib>\n"
@@ -1018,6 +1029,55 @@ static const char *kLayerCompositeMSL =
 	"}\n"
 	"fragment float4 layer_fs( LayerOut in [[stage_in]], texture2d<float> layer [[texture(0)]], sampler smp [[sampler(0)]] ) {\n"
 	"	return layer.sample( smp, in.uv );\n"
+	"}\n"
+	// Depth-aware upsample: of the four layer texels around the pixel, only those drawn at
+	// about the pixel's own depth are blended, so steam behind a nearer edge does not bleed
+	// onto it. Depth d is 1 - near / z (infinite far plane), so (1 - d) ratios are distance ratios.
+	"struct LayerDepthParams { int4 rect; int4 misc; };\n"	// rect: scene pixels with depth; misc: texel offset, scale
+	"fragment float4 layer_depth_fs( LayerOut in [[stage_in]], texture2d<float> layer [[texture(0)]], texture2d<float> depth [[texture(1)]],\n"
+	"								 sampler smp [[sampler(0)]], constant LayerDepthParams &p [[buffer(0)]] ) {\n"
+	"	const int2 px = int2( in.position.xy );\n"
+	"	const int2 rmin = p.rect.xy, rmax = p.rect.xy + p.rect.zw - 1;\n"
+	"	const float4 plain = layer.sample( smp, in.uv );\n"
+	// colour is never negative and alpha never above 1, so an empty filtered sample means four empty texels
+	"	if ( any( px < rmin ) || any( px > rmax ) || ( plain.a > 0.999 && max3( plain.r, plain.g, plain.b ) < 0.001 ) ) {\n"
+	"		return plain;\n"
+	"	}\n"
+	"	const int s = p.misc.z;\n"
+	"	const int2 off = p.misc.xy;\n"
+	"	const float a = max( 1.0 - depth.read( uint2( px + off ) ).r, 1e-7 );\n"
+	"	const float2 f = ( float2( px ) + 0.5 ) / float( s ) - 0.5;\n"
+	"	const int2 i0 = int2( floor( f ) );\n"
+	"	const float2 t = f - float2( i0 );\n"
+	"	const int2 lmax = int2( layer.get_width(), layer.get_height() ) - 1;\n"
+	"	int2 li[4];\n"
+	"	float rd[4];\n"
+	"	bool edge = false;\n"
+	"	for ( int k = 0; k < 4; k++ ) {\n"
+	"		li[k] = clamp( i0 + int2( k & 1, k >> 1 ), int2( 0 ), lmax );\n"
+	"		const int2 dp = clamp( li[k] * s + s / 2, rmin, rmax );\n"
+	"		const float b = max( 1.0 - depth.read( uint2( dp + off ) ).r, 1e-7 );\n"
+	"		rd[k] = max( a, b ) / min( a, b ) - 1.0;\n"
+	"		edge = edge || rd[k] >= 0.1;\n"
+	"	}\n"
+	"	if ( !edge ) {\n"
+	"		return plain;\n"
+	"	}\n"
+	"	float4 sum = 0.0, nearest = 0.0;\n"
+	"	float wsum = 0.0, best = 1e30;\n"
+	"	for ( int k = 0; k < 4; k++ ) {\n"
+	"		const float4 c = layer.read( uint2( li[k] ) );\n"
+	"		const float w = ( ( k & 1 ) ? t.x : 1.0 - t.x ) * ( ( k >> 1 ) ? t.y : 1.0 - t.y );\n"
+	"		if ( rd[k] < 0.1 ) {\n"
+	"			sum += c * w;\n"
+	"			wsum += w;\n"
+	"		}\n"
+	"		if ( rd[k] < best ) {\n"
+	"			best = rd[k];\n"
+	"			nearest = c;\n"
+	"		}\n"
+	"	}\n"
+	"	return wsum > 1e-4 ? sum / wsum : nearest;\n"
 	"}\n";
 
 static void GLMetal_ReleaseLayerTargets( void ) {
@@ -1030,16 +1090,9 @@ static void GLMetal_ReleaseLayerTargets( void ) {
 	s_layerTargetScale = 0;
 }
 
-static bool GLMetal_EnsureLayerCompositePipeline( void ) {
-	if ( s_layerCompositePipeline ) {
-		return true;
-	}
-	MTL::Library *lib = GLMetal_LoadShaderLibraryFromSource( kLayerCompositeMSL, "layer composite" );
-	if ( !lib ) {
-		return false;
-	}
+static MTL::RenderPipelineState *GLMetal_NewLayerCompositePipeline( MTL::Library *lib, const char *fragmentName ) {
 	MTL::Function *vs = lib->newFunction( NS::String::string( "layer_vs", NS::UTF8StringEncoding ) );
-	MTL::Function *fs = lib->newFunction( NS::String::string( "layer_fs", NS::UTF8StringEncoding ) );
+	MTL::Function *fs = lib->newFunction( NS::String::string( fragmentName, NS::UTF8StringEncoding ) );
 	MTL::RenderPipelineDescriptor *desc = MTL::RenderPipelineDescriptor::alloc()->init();
 	desc->setVertexFunction( vs );
 	desc->setFragmentFunction( fs );
@@ -1057,7 +1110,7 @@ static bool GLMetal_EnsureLayerCompositePipeline( void ) {
 	desc->setStencilAttachmentPixelFormat( s_depthPixelFormat );
 	desc->setRasterSampleCount( (NS::UInteger)s_sampleCount );
 	NS::Error *error = nullptr;
-	s_layerCompositePipeline = s_device->newRenderPipelineState( desc, &error );
+	MTL::RenderPipelineState *pipeline = s_device->newRenderPipelineState( desc, &error );
 	desc->release();
 	if ( vs ) {
 		vs->release();
@@ -1065,10 +1118,23 @@ static bool GLMetal_EnsureLayerCompositePipeline( void ) {
 	if ( fs ) {
 		fs->release();
 	}
-	lib->release();
-	if ( !s_layerCompositePipeline ) {
-		MetalHost_Warning( "[Metal] layer composite pipeline creation failed: %s", MetalErrorString( error ) );
+	if ( !pipeline ) {
+		MetalHost_Warning( "[Metal] layer composite pipeline (%s) creation failed: %s", fragmentName, MetalErrorString( error ) );
 	}
+	return pipeline;
+}
+
+static bool GLMetal_EnsureLayerCompositePipeline( void ) {
+	if ( s_layerCompositePipeline ) {
+		return true;
+	}
+	MTL::Library *lib = GLMetal_LoadShaderLibraryFromSource( kLayerCompositeMSL, "layer composite" );
+	if ( !lib ) {
+		return false;
+	}
+	s_layerCompositePipeline = GLMetal_NewLayerCompositePipeline( lib, "layer_fs" );
+	s_layerCompositeDepthPipeline = GLMetal_NewLayerCompositePipeline( lib, "layer_depth_fs" );
+	lib->release();
 	return s_layerCompositePipeline != nullptr;
 }
 
@@ -1106,6 +1172,7 @@ int GLMetal_BeginBlendLayer( uint32_t blendKey ) {
 				return 0;
 			}
 		}
+		s_layerGroupDepth = s_lastDepthCopy;
 	}
 	s_layerActive = true;
 	return s_layerScale;
@@ -1167,7 +1234,14 @@ static void GLMetal_FlushBlendLayer( void ) {
 		// the part of the target the scene covers
 		const float uvScale[4] = { (float)s_width / ( (float)s_layerWidth * s_layerTargetScale ),
 								   (float)s_height / ( (float)s_layerHeight * s_layerTargetScale ), 0.0f, 0.0f };
-		s_encoder->setRenderPipelineState( s_layerCompositePipeline );
+		const MetalLayerDepth &ld = s_layerGroupDepth;
+		const bool depthAware = s_layerTargetScale > 1 && ld.tex && s_layerCompositeDepthPipeline;
+		s_encoder->setRenderPipelineState( depthAware ? s_layerCompositeDepthPipeline : s_layerCompositePipeline );
+		if ( depthAware ) {
+			const int32_t params[8] = { ld.x, ld.y, ld.width, ld.height, ld.offsetX, ld.offsetY, s_layerTargetScale, 0 };
+			s_encoder->setFragmentBytes( params, sizeof( params ), 0 );
+			s_encoder->setFragmentTexture( ld.tex, 1 );
+		}
 		if ( noDepth ) {
 			s_encoder->setDepthStencilState( noDepth );
 		}
@@ -1487,6 +1561,7 @@ void GLMetal_CopySceneToTexture( bool depth, int srcX, int srcY, int width, int 
 	const MTL::Origin dstOrigin = MTL::Origin::Make( (NS::UInteger)dstX, (NS::UInteger)dstY, 0 );
 	if ( depth ) {
 		s_depthCopyFrame = s_frameSerial;
+		s_lastDepthCopy = { dst, srcX, srcY, width, height, dstX - srcX, dstY - srcY };
 	}
 	if ( depth && replay && GLMetal_CanReplayDepth() && s_replayDepth && s_queue ) {
 		// draw the depth buffer again instead of ending the scene pass to read it
@@ -2012,6 +2087,7 @@ bool GLMetal_BeginFrame( void ) {
 	}
 	s_layerTargetsUsed = 0;
 	s_layerActive = false;
+	s_lastDepthCopy.tex = nullptr;
 	return true;
 }
 
@@ -2139,6 +2215,12 @@ void GLMetal_Shutdown( void ) {
 		s_layerCompositePipeline->release();
 		s_layerCompositePipeline = nullptr;
 	}
+	if ( s_layerCompositeDepthPipeline ) {
+		s_layerCompositeDepthPipeline->release();
+		s_layerCompositeDepthPipeline = nullptr;
+	}
+	s_lastDepthCopy.tex = nullptr;
+	s_layerGroupDepth.tex = nullptr;
 	GLMetal_ReleaseLayerTargets();
 	s_depthDraws.clear();
 	s_layerDraws.clear();
