@@ -399,6 +399,7 @@ private:
 
 	int				pollTime;
 	int				lastPollTime;
+	float			angleMsec;			// time the keyboard turns the view for, per usercmd
 	float			lastLookValuePitch;
 	float			lastLookValueYaw;
 
@@ -466,6 +467,7 @@ idUsercmdGenLocal::idUsercmdGenLocal
 ================
 */
 idUsercmdGenLocal::idUsercmdGenLocal( void ) {
+	angleMsec = USERCMD_MSEC;
 	lastCommandTime = 0;
 	initialized = false;
 
@@ -571,10 +573,12 @@ Moves the local angle positions
 void idUsercmdGenLocal::AdjustAngles( void ) {
 	float	speed;
 
+	// by the time since the last usercmd, not by a fixed tic: usercmds are also made for
+	// frames between tics (com_smoothFrames)
 	if ( toggled_run.on ^ ( in_alwaysRun.GetBool() && AlwaysRunAllowed() ) ) { // DG: always run in SP
-		speed = idMath::M_MS2SEC * USERCMD_MSEC * in_angleSpeedKey.GetFloat();
+		speed = idMath::M_MS2SEC * angleMsec * in_angleSpeedKey.GetFloat();
 	} else {
-		speed = idMath::M_MS2SEC * USERCMD_MSEC;
+		speed = idMath::M_MS2SEC * angleMsec;
 	}
 
 	if ( !ButtonState( UB_STRAFE ) ) {
@@ -1342,6 +1346,8 @@ void idUsercmdGenLocal::UsercmdInterrupt( void ) {
 		return;
 	}
 
+	angleMsec = USERCMD_MSEC;
+
 	// init the usercmd for com_ticNumber+1
 	InitCurrent();
 
@@ -1388,6 +1394,7 @@ usercmd_t idUsercmdGenLocal::GetDirectUsercmd( void ) {
 	if ( pollTime - lastPollTime > 100 ) {
 		lastPollTime = pollTime - 100;
 	}
+	angleMsec = pollTime - lastPollTime;
 
 	// initialize current usercmd
 	InitCurrent();

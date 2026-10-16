@@ -59,6 +59,7 @@ INTRO_SHOT_TICS = [700, 1000, 1400, 1800]
 
 # Image comparison thresholds (applied on a half-resolution sample of each image).
 PIXEL_DIFF_THRESHOLD = 32      # max channel difference that counts a pixel as "different"
+SAME_PERCENT = 0.5             # % of differing pixels allowed between shots that must be the same
 FLAG_PERCENT = 0.5             # % of differing pixels that flags an image for review
 TIMEDEMO_REGRESSION_PCT = 5.0  # fps drop that flags a performance regression
 
@@ -90,6 +91,7 @@ PROBLEM_PATTERNS = [
 
 BACKGROUND = True   # the game never comes to the front (--foreground turns this off)
 EXTRA_CVARS = {}     # --set NAME VALUE: cvars added to every launch
+FS_GAME = None       # --fs-game NAME: run a mod folder
 
 
 def log(msg):
@@ -295,6 +297,12 @@ def parse_log(text):
     backend = [float(x) for x in re.findall(r"frame stats \(\d+ frames[^)]*\):.*?backend ([\d.]+) ms", text)]
     if len(backend) > 2:
         metrics["backend_ms"] = round(statistics.median(backend), 4)
+    fps = [float(x) for x in re.findall(r"^fps: ([\d.]+) \(", text, re.M)]
+    if fps:
+        # the first reports include the level load
+        tail = fps[len(fps) // 2:] or fps
+        metrics["fps"] = {"median": round(statistics.median(tail), 1), "min": round(min(tail), 1),
+                          "max": round(max(tail), 1), "reports": len(fps)}
     dev = re.search(r"\[Metal\] device: (.*)", text)
     if dev:
         metrics["device"] = dev.group(1).strip()
@@ -523,6 +531,77 @@ def switch_cfg(mapname, first):
     return "\n".join(lines) + "\n"
 
 
+def smooth_cfg(data, game, mapname):
+    """Checks frame interpolation (com_smoothFrames) with fixed states (com_smoothFramesDebug),
+    all within one session: a frame half way between two game frames must look like a frame
+    taken half way, a frame at alpha 0 like the frame before, and a view turned by the
+    input since the last game frame like a view that really faces there."""
+    x, y, z, yaw = map_viewpoints(data, game, mapname)[3]
+    def pos(dx=0, dyaw=0):
+        return "setviewpos %s %s %s %s" % (x + dx, y, z, yaw + dyaw)
+    lines = ["map %s" % mapname]
+    for _ in range(10):
+        lines += ["wait 60", "skipCinematic"]
+    lines += ["wait 150", "god", "notarget", "noclip", "wait 2", "set g_stopTime 1", "wait 2",
+              pos(), "wait 10", "screenshot shots/at0.tga", "wait 2",
+              pos(20), "wait 10", "screenshot shots/at20.tga", "wait 2",
+              pos(0, 10), "wait 10", "screenshot shots/yaw10.tga", "wait 2",
+              # half way between two game frames
+              pos(), "wait 10", 'set com_smoothFramesDebug "0.5"', "wait 2",
+              pos(40), "wait 1", "screenshot shots/half_0_40.tga", "wait 2",
+              # alpha 0: the game frame before
+              'set com_smoothFramesDebug "1"', pos(), "wait 10", 'set com_smoothFramesDebug "0"', "wait 2",
+              pos(40), "wait 1", "screenshot shots/alpha0_0_40.tga", "wait 2",
+              # input turned 10 degrees since the last game frame
+              'set com_smoothFramesDebug "1"', pos(), "wait 10", 'set com_smoothFramesDebug "1 0 10"', "wait 3",
+              "screenshot shots/look10.tga", "wait 2", "quit"]
+    return "\n".join(lines) + "\n"
+
+
+def uncapped_cfg(mapname, intro):
+    """Real play conditions: frames are not tied to game tics (com_smoothFrames), the game
+    runs for some seconds. With com_smoothFrames a wait counts sixtieths of a second."""
+    lines = ["map %s" % mapname]
+    if not intro:
+        for _ in range(10):
+            lines += ["wait 60", "skipCinematic"]
+        lines += ["god", "notarget"]
+    lines += ["wait 600", "screenshot shots/a.tga", "wait 300", "screenshot shots/b.tga", "wait 5", "quit"]
+    return "\n".join(lines) + "\n"
+
+
+SMOOTH_INTRO_TICS = [900, 1200, 1500, 1750]
+
+
+def smooth_intro_cfg(mapname):
+    """Frame interpolation while everything moves (the opening cinematic: camera, models,
+    skeletons): a frame at alpha 0 after the next game frame must look like the frame
+    before it. `next<i>` is that next game frame as it is, to show that things did move."""
+    lines = ["map %s" % mapname]
+    last = 0
+    for i, tic in enumerate(SMOOTH_INTRO_TICS):
+        lines += ['set com_smoothFramesDebug "1"', "wait %d" % (tic - last), "screenshot shots/now%d.tga" % i,
+                  'set com_smoothFramesDebug "0"', "wait 1", "screenshot shots/back%d.tga" % i,
+                  'set com_smoothFramesDebug "1"', "screenshot shots/next%d.tga" % i]
+        last = tic + 1
+    lines += ["wait 2", "quit"]
+    return "\n".join(lines) + "\n"
+
+
+def flashlight_cfg(data, game, mapname):
+    """The armor mounted flashlight (g_mountedFlashlight): toggleFlashlight
+    switches it on and off again, with a weapon in hand."""
+    x, y, z, yaw = map_viewpoints(data, game, mapname)[3]
+    lines = ["map %s" % mapname]
+    for _ in range(10):
+        lines += ["wait 60", "skipCinematic"]
+    lines += ["wait 150", "god", "notarget", "noclip", "wait 2",
+              "setviewpos %s %s %s %s" % (x, y, z, yaw), "wait 30", "screenshot shots/off.tga", "wait 2",
+              "toggleFlashlight", "wait 30", "screenshot shots/on.tga", "wait 2",
+              "toggleFlashlight", "wait 30", "screenshot shots/off_again.tga", "wait 2", "quit"]
+    return "\n".join(lines) + "\n"
+
+
 def timedemo_cfg(demo):
     return "timeDemoQuit %s\n" % demo
 
@@ -552,6 +631,28 @@ def build_scenarios(args, renderer):
             scen.append({"name": scen_name("special", game, mapname), "game": game,
                          "cfg": special_cfg(args.data, game, mapname), "shots": kinds,
                          "diff": True, "cvars": {"com_fixedTic": "1"}})
+    scen.append({"name": "smooth_base_alphalabs1", "game": "base",
+                 "cfg": smooth_cfg(args.data, "base", "game/alphalabs1"),
+                 "shots": ["at0", "at20", "yaw10", "half_0_40", "alpha0_0_40", "look10"], "diff": False,
+                 "same": [("half_0_40", "at20"), ("alpha0_0_40", "at0"), ("look10", "yaw10")],
+                 "cvars": {"com_fixedTic": "1"}})
+    for game, mapname, intro in ([("base", "game/alphalabs1", False), ("base", "game/mars_city1", True)]
+                                 + ([("d3xp", "game/erebus1", False)] if args.suite == "full" else [])):
+        scen.append({"name": scen_name("uncapped_intro" if intro else "uncapped", game, mapname), "game": game,
+                     "cfg": uncapped_cfg(mapname, intro), "shots": ["a", "b"], "diff": False, "fps": True,
+                     "cvars": {"com_fixedTic": "0", "com_smoothFrames": "1", "com_maxFPS": "0",
+                               "r_swapInterval": "0", "com_printFPS": "500"}})
+    n = len(SMOOTH_INTRO_TICS)
+    scen.append({"name": "smooth_intro_base_mars_city1", "game": "base",
+                 "cfg": smooth_intro_cfg("game/mars_city1"),
+                 "shots": ["%s%d" % (k, i) for i in range(n) for k in ("now", "back", "next")], "diff": False,
+                 "same": [("back%d" % i, "now%d" % i) for i in range(n)],
+                 "cvars": {"com_fixedTic": "1"}})
+    for game, mapname in ([("base", "game/alphalabs1")] + ([("d3xp", "game/erebus1")] if args.suite == "full" else [])):
+        scen.append({"name": scen_name("flashlight", game, mapname), "game": game,
+                     "cfg": flashlight_cfg(args.data, game, mapname), "shots": ["off", "on", "off_again"],
+                     "diff": True, "brighter": [("on", "off"), ("on", "off_again")],
+                     "cvars": {"com_fixedTic": "1", "g_mountedFlashlight": "1"}})
     scen.append({"name": "demoshots_demo1", "game": "base", "cfg": demoshots_cfg("demo1"),
                  "shots": ["demo_%05d" % f for f in DEMO_SHOT_FRAMES], "diff": True,
                  "cvars": {"com_fixedTic": "-1",
@@ -602,6 +703,9 @@ def base_command(binary, renderer, data, home, res, game, cvars):
            "+set", "r_customHeight", str(res[1]),
            "+set", "r_multiSamples", "0",
            "+set", "r_swapInterval", "0",
+           # Metal draws soft particles into a separate layer by default, which OpenGL
+           # cannot do: off for the comparison (test it with --set r_metalParticleLayer 2)
+           "+set", "r_metalParticleLayer", "0",
            "+set", "r_gamma", "1",
            "+set", "r_brightness", "1",
            "+set", "sys_lang", "english",   # the game data's default.cfg may pick another
@@ -634,6 +738,14 @@ def new_crash_reports(since):
 
 
 def launch(binary, renderer, data, home, res, game, cvars, cfg_text, outdir, timeout, env=None):
+    # --fs-game: a mod folder (and the game folder it is based on) instead of base / d3xp;
+    # the game then writes its screenshots into the mod's folder
+    if FS_GAME:
+        cvars = dict(cvars, fs_game=FS_GAME if game == "base" else game)
+        if game != "base":
+            cvars["fs_game_base"] = FS_GAME
+        else:
+            game = FS_GAME
     gamedir = os.path.join(home, game)
     os.makedirs(gamedir, exist_ok=True)
     os.makedirs(outdir, exist_ok=True)
@@ -668,7 +780,7 @@ def launch(binary, renderer, data, home, res, game, cvars, cfg_text, outdir, tim
                 proc.kill()
                 proc.wait()
     return {"exit_code": proc.returncode, "timed_out": timed_out,
-            "duration_s": round(time.time() - start, 1), "started": start}
+            "duration_s": round(time.time() - start, 1), "started": start, "gamedir": gamedir}
 
 
 def run_scenario(args, label_dir, scen, binary, renderer):
@@ -681,7 +793,7 @@ def run_scenario(args, label_dir, scen, binary, renderer):
     os.makedirs(home)
     res = launch(binary, renderer, args.data, home, args.res, scen["game"], scen.get("cvars", {}),
                  scen["cfg"], outdir, scen.get("timeout", args.timeout), scen.get("env"))
-    gamedir = os.path.join(home, scen["game"])
+    gamedir = res["gamedir"]
     reasons = []
     status = "PASS"
     if res["timed_out"]:
@@ -731,9 +843,32 @@ def run_scenario(args, label_dir, scen, binary, renderer):
         except Exception as e:  # unreadable image
             status = "FAIL"
             reasons.append("bad screenshot %s: %s" % (shot, e))
+    # pairs of screenshots of this run that must show the same thing
+    for a, b in scen.get("same", []):
+        pa, pb = os.path.join(shots_dir, a + ".tga"), os.path.join(shots_dir, b + ".tga")
+        if os.path.isfile(pa) and os.path.isfile(pb):
+            st = diff_images(pa, pb, os.path.join(outdir, "%s__vs__%s.png" % (a, b)))
+            if st.get("error") or st["pct_pixels_differ"] > SAME_PERCENT:
+                status = "FAIL"
+                reasons.append("%s differs from %s: %s" % (a, b, st.get("error") or "%.2f%% of pixels" % st["pct_pixels_differ"]))
+    # pairs of screenshots of which the first must be clearly brighter
+    for a, b in scen.get("brighter", []):
+        if a in shots and b in shots and shots[a]["mean"] < shots[b]["mean"] * 1.05:
+            status = "FAIL"
+            reasons.append("%s (mean %.1f) is not brighter than %s (mean %.1f)" % (a, shots[a]["mean"], b, shots[b]["mean"]))
     if scen.get("timedemo") and "timedemo" not in metrics:
         status = "FAIL"
         reasons.append("no timedemo result in the log")
+    if scen.get("fps"):
+        f = metrics.get("fps")
+        if not f:
+            status = "FAIL"
+            reasons.append("no frame rate reports in the log")
+        else:
+            reasons.append("%.0f fps (median; %.0f to %.0f)" % (f["median"], f["min"], f["max"]))
+            if f["median"] < 70.0:
+                status = "FAIL"
+                reasons.append("frames are still tied to the 60 Hz game tic")
     if problems and status == "PASS":
         status = "WARN"
     if problems:
@@ -898,7 +1033,8 @@ def cmd_build(args):
 
 
 def common_setup(args):
-    global BACKGROUND, EXTRA_CVARS
+    global BACKGROUND, EXTRA_CVARS, FS_GAME
+    FS_GAME = args.fs_game
     BACKGROUND = not args.foreground
     EXTRA_CVARS = {k: v for k, v in (args.set or [])}
     args.data = os.path.abspath(os.path.expanduser(args.data))
@@ -962,6 +1098,7 @@ def main():
         sp.add_argument("--foreground", action="store_true",
                         help="let the game window come to the front and take focus")
         sp.add_argument("--keep-home", action="store_true")
+        sp.add_argument("--fs-game", help="mod folder to run (fs_game; for d3xp scenarios fs_game_base)")
         sp.add_argument("--set", nargs=2, action="append", metavar=("NAME", "VALUE"))
 
     r = sub.add_parser("run")

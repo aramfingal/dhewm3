@@ -1141,11 +1141,24 @@ idRenderModel *R_EntityDefDynamicModel( idRenderEntityLocal *def ) {
 		R_ClearEntityDefDynamicModel( def );
 	}
 
+	// a frame between two game tics shows the skeleton between its two poses
+	// (RenderWorld_interp.cpp)
+	bool rebuildForPose = false;
+	const idJointMat *poseBetween = R_InterpJoints( def, rebuildForPose );
+	if ( rebuildForPose ) {
+		R_ClearEntityDefDynamicModel( def );
+	}
+
 	// if we don't have a snapshot of the dynamic model, generate it now
 	if ( !def->dynamicModel ) {
 
 		// instantiate the snapshot of the dynamic model, possibly reusing memory from the cached snapshot
+		idJointMat *gameJoints = def->parms.joints;
+		if ( poseBetween ) {
+			def->parms.joints = const_cast<idJointMat *>( poseBetween );
+		}
 		def->cachedDynamicModel = model->InstantiateDynamicModel( &def->parms, tr.viewDef, def->cachedDynamicModel );
+		def->parms.joints = gameJoints;
 
 		if ( def->cachedDynamicModel ) {
 

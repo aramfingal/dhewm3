@@ -23,6 +23,12 @@ int		MGL_Init( void *caMetalLayer, int width, int height, int multiSamples );
 void	MGL_Shutdown( void );
 void	MGL_SwapBuffers( void );
 void	MGL_Resize( int width, int height );
+// The draws up to MGL_EndParticleLayer are soft particles (blended, not depth tested, reading
+// fragment.position only to look up _currentDepth). Returns 0, or the factor by which the
+// target they will be drawn into is smaller than the scene: fragment.position is then in the
+// pixels of that target.
+float	MGL_BeginParticleLayer( void );
+void	MGL_EndParticleLayer( void );
 void	( *MGL_GetProcAddress( const char *name ) )( void );
 
 #ifdef __cplusplus

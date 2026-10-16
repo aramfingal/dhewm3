@@ -236,6 +236,12 @@ public:
 	int					lastDemoTic;
 	bool				syncNextGameFrame;
 
+	// frames between game tics (com_smoothFrames)
+	bool				smoothFrames;			// frames are not tied to game tics right now
+	double				lastGameTicStartMS;		// real time at which the tic of the latest game frame began
+	short				lastGameTicAngles[3];	// view angles of the usercmd of the latest game frame
+	short				prevGameTicAngles[3];	// and of the game frame before it
+
 
 	bool				aviCaptureMode;		// if true, screenshots will be taken and sound captured
 	idStr				aviDemoShortName;	//

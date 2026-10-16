@@ -34,6 +34,8 @@ two result folders (`--strict` treats flagged images as failures).
 |---|---|
 | `menu` | the main menu draws (GUI path, cinematic background); two screenshots |
 | `views_<game>_<map>` | six fixed views per map, compared across renderers and builds |
+| `smooth_base_alphalabs1` | frame interpolation (`com_smoothFrames`, `docs/FRAMERATE.md`) with fixed states: pairs of screenshots within the session that must be the same (half way between two tics, alpha 0, a view turned by pending input) |
+| `uncapped_<game>_<map>`, `uncapped_intro_base_mars_city1` | a map played for 15 s with frames not tied to game tics; reports the frame rate (`com_printFPS`) and fails below 70 fps |
 | `demoshots_demo1` | `timeDemo demo1` with screenshots at 16 fixed demo frames (`com_demoShotFrames`). A render demo replays recorded scenes, so this is the strictest comparison: two OpenGL runs are bit-identical |
 | `intro_base_mars_city1` | (full suite) the opening cinematic at four fixed tics |
 | `special_<game>_<map>` | views of the largest mirror, heat-haze and cube-map surface of the map, found in the map's `.proc` and the materials (mars_city1; full suite adds delta2a, hell1) |
@@ -52,6 +54,13 @@ cinematic, the level runs 150 more tics, then `god`, `notarget`, `noclip` and
 Positions come from the map file itself: item entities spread through the entity list, eye
 56 units above each, yaw stepping by 90 degrees. Two OpenGL runs give images that differ in
 at most about 0.3% of pixels; an image is flagged above 0.5%.
+
+`flashlight_*` takes a view with the armor mounted flashlight off, on and off again
+(`toggleFlashlight`); the lit image must be at least 5% brighter than the other two.
+
+In the scripts `wait N` waits N frames (with `com_fixedTic 1`, N game tics). Stock dhewm3
+counted calls of the command buffer instead, which also happen once per input event; this
+fork counts frames, and that made the frozen views repeatable.
 
 Timedemos run with `com_fixedTic -1`, which in this fork lets frames run without waiting for
 the 60 Hz tic (stock dhewm3 holds a timedemo to 60 fps).
@@ -91,5 +100,6 @@ build of the same renderer are FAIL.
 | `--validation` | add the Metal API validation scenario |
 | `--foreground` | show the game window |
 | `--set NAME VALUE` | set a cvar in every launch (repeatable) |
+| `--fs-game NAME` | run a mod folder (`fs_game NAME`; for d3xp scenarios `fs_game_base NAME`) |
 | `--keep-home` | keep each launch's throwaway home folder |
 | `--timeout N` | seconds per launch (default 300) |

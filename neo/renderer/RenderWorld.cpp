@@ -132,6 +132,8 @@ idRenderWorldLocal::idRenderWorldLocal() {
 	mapTimeStamp = FILE_NOT_FOUND_TIMESTAMP;
 
 	generateAllInteractionsCalled = false;
+	memset( &interp, 0, sizeof( interp ) );
+	interp.viewsTic = interp.prevViewsTic = -1;
 
 	areaNodes = NULL;
 	numAreaNodes = 0;
@@ -226,6 +228,7 @@ void idRenderWorldLocal::UpdateEntityDef( qhandle_t entityHandle, const renderEn
 
 	idRenderEntityLocal	*def = entityDefs[entityHandle];
 	if ( def ) {
+		InterpNoteEntityUpdate( def, re );
 
 		if ( !re->forceUpdate ) {
 
@@ -269,9 +272,11 @@ void idRenderWorldLocal::UpdateEntityDef( qhandle_t entityHandle, const renderEn
 
 		def->world = this;
 		def->index = entityHandle;
+		InterpNoteEntityUpdate( def, re );
 	}
 
 	def->parms = *re;
+	def->interp.applied = false;
 
 	R_AxisToModelMatrix( def->parms.axis, def->parms.origin, def->modelMatrix );
 
@@ -401,6 +406,7 @@ void idRenderWorldLocal::UpdateLightDef( qhandle_t lightHandle, const renderLigh
 	bool justUpdate = false;
 	idRenderLightLocal *light = lightDefs[lightHandle];
 	if ( light ) {
+		InterpNoteLightUpdate( light, rlight );
 		// if the shape of the light stays the same, we don't need to dump
 		// any of our derived data, because shader parms are calculated every frame
 		if ( rlight->axis == light->parms.axis && rlight->end == light->parms.end &&
@@ -423,9 +429,11 @@ void idRenderWorldLocal::UpdateLightDef( qhandle_t lightHandle, const renderLigh
 
 		light->world = this;
 		light->index = lightHandle;
+		InterpNoteLightUpdate( light, rlight );
 	}
 
 	light->parms = *rlight;
+	light->interp.applied = false;
 	light->lastModifiedFrameNum = tr.frameCount;
 	if ( session->writeDemo && light->archived ) {
 		WriteFreeLight( lightHandle );
@@ -677,13 +685,17 @@ to handle mirrors,
 */
 extern void R_SetupViewFrustum( viewDef_t* viewDef );
 extern void R_SetupProjection( viewDef_t * viewDef );
-void idRenderWorldLocal::RenderScene( const renderView_t *renderView ) {
+void idRenderWorldLocal::RenderScene( const renderView_t *gameView ) {
 #ifndef	ID_DEDICATED
 	renderView_t	copy;
 
 	if ( !glConfig.isInitialized ) {
 		return;
 	}
+
+	// between two game tics the view is in between as well (RenderWorld_interp.cpp)
+	renderView_t	interpolatedView;
+	const renderView_t *renderView = InterpView( gameView, interpolatedView );
 
 	copy = *renderView;
 

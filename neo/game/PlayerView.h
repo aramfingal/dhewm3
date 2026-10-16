@@ -53,6 +53,7 @@ typedef struct {
 	int					finishTime;
 	int					startFadeTime;
 	float				driftAmount;
+	int					driftFrame;			// game frame in which it last drifted
 } screenBlob_t;
 
 #define	MAX_SCREEN_BLOBS	8

@@ -51,6 +51,20 @@ idRenderEntityLocal::idRenderEntityLocal() {
 	firstInteraction		= NULL;
 	lastInteraction			= NULL;
 	needsPortalSky			= false;
+	memset( &interp, 0, sizeof( interp ) );
+	interpJoints			= NULL;
+	interpNumJoints			= 0;
+	interpJointsTic			= -1;
+	interpJointsFrame		= -1;
+	interpJointsMoving		= false;
+	interpJointsApplied		= false;
+}
+
+idRenderEntityLocal::~idRenderEntityLocal() {
+	if ( interpJoints ) {
+		Mem_Free16( interpJoints );
+		interpJoints = NULL;
+	}
 }
 
 void idRenderEntityLocal::FreeRenderEntity() {
@@ -84,6 +98,7 @@ idRenderLightLocal::idRenderLightLocal() {
 	memset( frustum, 0, sizeof( frustum ) );
 	memset( frustumWindings, 0, sizeof( frustumWindings ) );
 
+	memset( &interp, 0, sizeof( interp ) );
 	lightHasMoved			= false;
 	world					= NULL;
 	index					= 0;

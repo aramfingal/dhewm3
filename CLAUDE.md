@@ -50,8 +50,40 @@ code) are in `build/`. Run it with
   (`neo/framework/Common.cpp`), so `timeDemo` measures the renderer instead of the tic rate.
 - `com_demoShotFrames "150 400 ..."`: while a render demo plays, writes
   `shots/demo_<frame>.tga` at exactly those demo frames (`neo/framework/Session.cpp`).
+- `wait N` counts frames (or game tics with `com_smoothFrames`), not command buffer runs.
+- `com_printFPS N` prints the average frame rate every N frames.
+- More than 32 `+command` arguments no longer overflow `com_consoleLines` (a crash at
+  start-up in stock dhewm3); the limit is 256.
+- With `SDL_MAC_BACKGROUND_APP` a crash exits after printing its backtrace instead of
+  raising the signal again, so test runs never bring up the macOS crash dialog.
 - `SDL_MAC_BACKGROUND_APP` handling (above).
 - arm64 macOS deployment target raised from 10.7 to 11.0 (`neo/CMakeLists.txt`).
+
+## HD texture pack
+
+The Doom 3 Essential HD Pack v2.0 is installed in the save path, outside the repo and the
+game data: `~/Library/Application Support/dhewm3/base/zzz_pak00*.pk4` and
+`.../dhewm3/d3xp/zzz_pak102.pk4`. Like Quake 3's pk3 files, pk4 files there load by
+themselves; removing them uninstalls the pack. The harness uses a throwaway `fs_savepath`,
+so it tests the original game data.
+
+## Armor mounted flashlight
+
+`g_mountedFlashlight 1` (default; `neo/game/Player.cpp` and `neo/d3xp/Player.cpp`,
+`UpdateMountedFlashlight`): selecting the flashlight weapon (F in the base game, 1 in RoE)
+or the `toggleFlashlight` command switches a light on the player's armor instead of
+swapping the weapon, as in the BFG Edition. It is the hand flashlight's own beam, a
+projected light only drawn in the player's view. Single player only; 0 gives the hand
+flashlight back. Harness scenario `flashlight_*`.
+
+## Frame rate
+
+The game runs 60 tics per second; frames are not tied to tics (`com_smoothFrames 1`, the
+default) and show the world interpolated between the last two tics. Read `docs/FRAMERATE.md`
+before touching `neo/renderer/RenderWorld_interp.cpp`, the tic loop in
+`neo/framework/Session.cpp` (`idSessionLocal::Frame`, `Draw`) or frame pacing in
+`neo/framework/Common.cpp`. The harness scenarios `smooth_*` and `uncapped_*` test it; the
+image scenarios run with `com_fixedTic 1`, which ties frames to tics as before.
 
 ## Architecture
 
@@ -77,4 +109,9 @@ Debugging: `r_metalDebug 1` prints every shader pair compiled, `2` also writes i
 `/tmp/mgl_pair_*.metal` (compile one with
 `xcrun -sdk macosx metal -std=metal3.0 -c file.metal -o /dev/null`). A pair that fails to
 compile is written to `/tmp/mgl_failed_*.metal` and draws nothing. `r_metalFrameStats N`
-prints frame timing. Cvars: `r_metalHidden`, `r_metalNoPresent`, `r_metalPresentHz`.
+prints frame timing. Cvars: `r_metalHidden`, `r_metalNoPresent`, `r_metalPresentHz`,
+`r_metalNoDepthReplay` (depth copies, see DESIGN.md).
+
+`r_metalParticleLayer` (default 2, archived) draws soft particles into a half-size layer on
+Metal only, so Metal and OpenGL images differ where there is steam or smoke. The harness sets
+it to 0; pass `--set r_metalParticleLayer 2` to test the layer. See DESIGN.md.

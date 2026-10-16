@@ -80,6 +80,59 @@ C++11): `metal_host.cpp` is the bridge for printing and cvars.
 - **Gamma and brightness.** dhewm3 applies `r_gamma`/`r_brightness` by patching every ARB
   fragment program (`r_gammaInShader`). The translator sees the patched text, so Metal matches.
 
+## Depth copies with multisampling
+
+Soft particles (`r_useSoftParticles`, on by default) copy the depth buffer to a texture
+right after the depth fill. A copy means ending the scene pass and opening it again, and
+with multisampling that stores and reloads every sample; blending onto reloaded samples is
+then about three times slower than onto samples that never left the tile. In a steam-filled
+corridor of alphalabs1 at 2560x1440 with 8 samples this was 6.6 ms a frame.
+
+So with multisampling the device layer records the depth-writing draws of a frame
+(`GLMetal_RecordDepthDraw`), and a depth copy draws them again into a single-sample depth
+target in a command buffer of its own, committed at once so it runs before the frame's. The
+scene pass stays open. Because that buffer runs first, each depth copy of a frame goes to a
+storage of its own (`CopySceneDepth` in `mgl.cpp`), or a second view's copy would be what the
+first view's particles read. The copied depth is that of pixel centres instead of sample 0;
+images differ in about 0.003% of pixels. `r_metalNoDepthReplay 1` gives the old path.
+Colour copies (heat haze) still end the pass.
+
+## The end of a multisampled frame
+
+The scene pass leaves its store actions open and chooses them when it ends
+(`GLMetal_EndEncoderIfNeeded`). A pass that ends in the middle of a frame stores everything,
+because the next pass loads it. The last pass of a frame only resolves colour and drops the
+samples, depth and stencil. Storing them was more than half the cost of an 8-sample frame at
+2560x1440 (1,026 fps before, 2,217 after, in a view without particles).
+
+## Soft particles in a layer (`r_metalParticleLayer`)
+
+Steam and smoke are stacks of large blended quads, and filling them into every sample of the
+scene target is what a view full of steam costs. Soft particles are not depth tested and have
+no hard edges, so they need neither the samples nor the resolution.
+
+The shared back end brackets a soft particle draw with `GLimp_BeginParticleLayer` /
+`GLimp_EndParticleLayer` (no-ops on OpenGL). The Metal device layer then records the draw
+instead of making it (`GLMetal_BeginBlendLayer`). Before anything else is drawn into the
+scene, or the pass ends, the recorded draws go into a single-sample RGBA16F target of
+1/scale the size, in a command buffer committed at once (it runs before the frame's, like
+the depth replay, whose depth texture it reads). The target starts as (0,0,0,1): rgb collects
+colour with the particle's own blend, alpha collects how much of the background is left.
+One rectangle in the scene pass then blends it over the scene (`colour + scene * alpha`).
+
+- Only blends that add to the background or cover it by source alpha qualify (source
+  `ONE`/`SRC_ALPHA`, destination `ONE`/`ONE_MINUS_SRC_ALPHA`); anything else is drawn as before.
+- Order is kept: any other draw into the scene ends the group collected so far. A frame can
+  have 4 groups; further particles are drawn directly.
+- The back end multiplies `PP_CURDEPTH_RECIPR` by the scale, because `fragment.position` is in
+  the layer's pixels.
+- It needs the depth copy of the frame to have been made by replay, so the replay is used
+  without multisampling as well.
+- `0` turns it off (what the harness compares with OpenGL), `1` is a full-size layer, `2`
+  (default) half, `4` quarter size. The image differs slightly from `0`: about one 8-bit step
+  in dense steam (the layer blends in floating point, the scene target rounds after every
+  quad), and at half size steam next to a nearer edge is a pixel softer.
+
 ## What the GL layer implements
 
 The inventory (`GL_INVENTORY.md`) lists 108 entry points. Implemented groups: state

@@ -449,6 +449,22 @@ void Cmd_CenterView_f( const idCmdArgs &args ) {
 
 /*
 ==================
+Cmd_ToggleFlashlight_f
+
+The armor mounted flashlight (g_mountedFlashlight), for a key of its own:
+bind x toggleFlashlight
+==================
+*/
+void Cmd_ToggleFlashlight_f( const idCmdArgs &args ) {
+	idPlayer *player = gameLocal.GetLocalPlayer();
+	if ( !player || !g_mountedFlashlight.GetBool() || gameLocal.isMultiplayer ) {
+		return;
+	}
+	player->ToggleMountedFlashlight();
+}
+
+/*
+==================
 Cmd_God_f
 
 Sets client to godmode
@@ -2421,6 +2437,7 @@ void idGameLocal::InitConsoleCommands( void ) {
 	cmdSystem->AddCommand( "gameKick",				Cmd_Kick_f,					CMD_FL_GAME,				"same as kick, but recognizes player names" );
 	cmdSystem->AddCommand( "give",					Cmd_Give_f,					CMD_FL_GAME|CMD_FL_CHEAT,	"gives one or more items" );
 	cmdSystem->AddCommand( "centerview",			Cmd_CenterView_f,			CMD_FL_GAME,				"centers the view" );
+	cmdSystem->AddCommand( "toggleFlashlight",		Cmd_ToggleFlashlight_f,		CMD_FL_GAME,				"switches the armor mounted flashlight on or off" );
 	cmdSystem->AddCommand( "god",					Cmd_God_f,					CMD_FL_GAME|CMD_FL_CHEAT,	"enables god mode" );
 	cmdSystem->AddCommand( "notarget",				Cmd_Notarget_f,				CMD_FL_GAME|CMD_FL_CHEAT,	"disables the player as a target" );
 	cmdSystem->AddCommand( "noclip",				Cmd_Noclip_f,				CMD_FL_GAME|CMD_FL_CHEAT,	"disables collision detection for the player" );

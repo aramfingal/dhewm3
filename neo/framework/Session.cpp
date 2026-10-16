@@ -49,6 +49,19 @@ idCVar	idSessionLocal::com_showAngles( "com_showAngles", "0", CVAR_SYSTEM | CVAR
 idCVar	idSessionLocal::com_minTics( "com_minTics", "1", CVAR_SYSTEM, "" );
 idCVar	idSessionLocal::com_showTics( "com_showTics", "0", CVAR_SYSTEM | CVAR_BOOL, "" );
 static idCVar com_demoShotFrames( "com_demoShotFrames", "", CVAR_SYSTEM, "space separated render demo frame numbers; when one is reached a screenshot is written to shots/demo_<frame>.tga" );
+extern idCVar com_smoothFrames;
+extern bool com_smoothFramesActive;
+double Com_CurrentTicStartMS();
+float Com_TicFraction( double ticStartMS );
+
+static idCVar com_viewFollowsInput( "com_viewFollowsInput", "0", CVAR_SYSTEM | CVAR_BOOL,
+	"internal: set by the game code every tic while the player's view turns with the input, so that frames between tics can turn it at once (com_smoothFrames)" );
+static idCVar com_smoothFramesDirectLook( "com_smoothFramesDirectLook", "1", CVAR_SYSTEM | CVAR_BOOL | CVAR_ARCHIVE,
+	"with com_smoothFrames: turn the view with the mouse in every frame instead of showing it up to one tic late like the rest of the world" );
+
+static idCVar com_smoothFramesDebug( "com_smoothFramesDebug", "", CVAR_SYSTEM,
+	"testing: \"alpha\" or \"alpha pitch yaw\" draws every frame as if that part of a tic had passed since the latest game frame (0..1) and, with pitch and yaw, as if the input had turned that many degrees since. Also works with com_fixedTic" );
+
 idCVar	idSessionLocal::com_fixedTic( "com_fixedTic", "0", CVAR_SYSTEM | CVAR_INTEGER | CVAR_ARCHIVE, "", -1, 10 );
 idCVar	idSessionLocal::com_showDemo( "com_showDemo", "0", CVAR_SYSTEM | CVAR_BOOL, "" );
 idCVar	idSessionLocal::com_skipGameDraw( "com_skipGameDraw", "0", CVAR_SYSTEM | CVAR_BOOL, "" );
@@ -324,6 +337,11 @@ idSessionLocal::Clear
 ===============
 */
 void idSessionLocal::Clear() {
+	smoothFrames = false;
+	lastGameTicStartMS = 0.0;
+	lastGameTicAngles[0] = lastGameTicAngles[1] = lastGameTicAngles[2] = 0;
+	prevGameTicAngles[0] = prevGameTicAngles[1] = prevGameTicAngles[2] = 0;
+
 
 	insideUpdateScreen = false;
 	insideExecuteMapChange = false;
@@ -2523,6 +2541,41 @@ void idSessionLocal::Draw() {
 	D3P_ScopedCPUSample(Session_Draw);
 	bool fullConsole = false;
 
+	// what a frame between two game tics shows (com_smoothFrames)
+	if ( rw ) {
+		const bool interpolate = smoothFrames && mapSpawned && !readDemo && !insideExecuteMapChange;
+		float alpha = 1.0f, lookPitch = 0.0f, lookYaw = 0.0f;
+		const float ticLookPitch = SHORT2ANGLE( (short)( lastGameTicAngles[0] - prevGameTicAngles[0] ) );
+		const float ticLookYaw = SHORT2ANGLE( (short)( lastGameTicAngles[1] - prevGameTicAngles[1] ) );
+		bool directLook = false;
+		if ( interpolate ) {
+			alpha = Com_TicFraction( lastGameTicStartMS );
+			if ( !guiActive && com_smoothFramesDirectLook.GetBool() && com_viewFollowsInput.GetBool() ) {
+				// how far the input has turned since the usercmd of the latest game frame
+				const usercmd_t now = usercmdGen->GetDirectUsercmd();
+				lookPitch = SHORT2ANGLE( (short)( now.angles[0] - lastGameTicAngles[0] ) );
+				lookYaw = SHORT2ANGLE( (short)( now.angles[1] - lastGameTicAngles[1] ) );
+				directLook = true;
+			}
+		}
+		// tests: a fixed state instead of what the clock and the mouse say
+		const char *debug = com_smoothFramesDebug.GetString();
+		if ( debug[0] && mapSpawned && !readDemo && !insideExecuteMapChange ) {
+			float a = 1.0f, p = 0.0f, y = 0.0f;
+			const int n = sscanf( debug, "%f %f %f", &a, &p, &y );
+			if ( n >= 1 ) {
+				alpha = a;
+				directLook = ( n == 3 ) && com_viewFollowsInput.GetBool();
+				lookPitch = p;
+				lookYaw = y;
+				R_FrameInterpolation_SetFrame( rw, true, alpha, directLook, lookPitch, lookYaw, ticLookPitch, ticLookYaw );
+				goto interpolationSet;
+			}
+		}
+		R_FrameInterpolation_SetFrame( rw, interpolate, alpha, directLook, lookPitch, lookYaw, ticLookPitch, ticLookYaw );
+interpolationSet:;
+	}
+
 	if ( insideExecuteMapChange ) {
 		if ( guiLoading ) {
 			guiLoading->Redraw( com_frameTime );
@@ -2751,6 +2804,17 @@ void idSessionLocal::Frame() {
 		minTic = latchedTicNumber;
 	}
 
+	// com_smoothFrames: don't wait for the next tic, draw a frame now. The game still runs
+	// one frame per tic (none in most frames), and what is drawn is interpolated between
+	// the last two game frames. Not while a demo is played or recorded, or with the
+	// cvars that tie frames to tics in other ways.
+	smoothFrames = com_smoothFrames.GetBool() && com_fixedTic.GetInteger() == 0 && com_minTics.GetInteger() <= 1
+		&& !readDemo && !writeDemo && !aviCaptureMode && !cmdDemoFile && !idAsyncNetwork::IsActive();
+	com_smoothFramesActive = smoothFrames;
+	if ( smoothFrames ) {
+		minTic = latchedTicNumber;
+	}
+
 	while( 1 ) {
 		latchedTicNumber = com_ticNumber;
 		if ( latchedTicNumber >= minTic ) {
@@ -2873,6 +2937,11 @@ void idSessionLocal::Frame() {
 	int	gameTicsToRun = latchedTicNumber - lastGameTic;
 	int i;
 	for ( i = 0 ; i < gameTicsToRun ; i++ ) {
+		// what the render world is told during this tic is where things are going to,
+		// what it knew before is where they come from
+		R_FrameInterpolation_BeginTic( rw );
+		lastGameTicStartMS = Com_CurrentTicStartMS();
+		com_viewFollowsInput.SetBool( false );	// the game code says so every tic
 		RunGameTic();
 		if ( !mapSpawned ) {
 			// exited game play
@@ -2920,6 +2989,10 @@ void idSessionLocal::RunGameTic() {
 		// get a locally created command
 		cmd = usercmdGen->GetDirectUsercmd();
 		lastGameTic++;
+	}
+	for ( int a = 0; a < 3; a++ ) {
+		prevGameTicAngles[a] = lastGameTicAngles[a];
+		lastGameTicAngles[a] = cmd.angles[a];
 	}
 
 	// run the game logic every player move

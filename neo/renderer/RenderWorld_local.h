@@ -156,6 +156,34 @@ public:
 
 	idList<idRenderModel *>	localModels;
 
+	//-----------------------
+	// RenderWorld_interp.cpp: frame interpolation between game tics
+
+	static const int		MAX_INTERP_VIEWS = 8;
+	struct {
+		int					ticCount;		// game tics seen
+		bool				active;			// this frame shows a state between two tics
+		float				alpha;			// 0 = previous tic, 1 = latest tic
+		bool				directLook;		// the view turns with the input of this frame
+		float				lookPitch;		// input since the latest tic, degrees
+		float				lookYaw;
+		float				ticLookPitch;	// input between the two latest tics, degrees
+		float				ticLookYaw;
+		int					sceneIndex;		// RenderScene calls so far this frame
+		int					viewsTic;		// tic the views[] belong to
+		int					numViews;
+		renderView_t		views[MAX_INTERP_VIEWS];		// the game's views after the latest tic
+		int					prevViewsTic;
+		int					numPrevViews;
+		renderView_t		prevViews[MAX_INTERP_VIEWS];	// and after the tic before it
+	} interp;
+
+	void					InterpBeginTic();
+	void					InterpSetFrame( bool enabled, float alpha, bool directLook, float lookPitch, float lookYaw, float ticLookPitch, float ticLookYaw );
+	void					InterpNoteEntityUpdate( idRenderEntityLocal *def, const renderEntity_t *re );
+	void					InterpNoteLightUpdate( idRenderLightLocal *light, const renderLight_t *rlight );
+	const renderView_t *	InterpView( const renderView_t *gameView, renderView_t &storage );
+
 	idList<idRenderEntityLocal*>	entityDefs;
 	idList<idRenderLightLocal*>		lightDefs;
 

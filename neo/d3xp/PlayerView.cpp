@@ -538,7 +538,11 @@ void idPlayerView::SingleView( idUserInterface *hud, const renderView_t *view ) 
 				continue;
 			}
 
-			blob->y += blob->driftAmount;
+			// once per game frame, not once per drawn frame
+			if ( blob->driftFrame != gameLocal.framenum ) {
+				blob->driftFrame = gameLocal.framenum;
+				blob->y += blob->driftAmount;
+			}
 
 			float	fade = (float)( blob->finishTime - gameLocal.slow.time ) / ( blob->finishTime - blob->startFadeTime );
 			if ( fade > 1.0f ) {

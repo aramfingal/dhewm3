@@ -60,11 +60,15 @@ struct MglTexture {
 	int maxLevel;
 	int border;				// 0 transparent black, 1 opaque black, 2 opaque white
 	MTL::SamplerState *sampler;	// NULL: parameters changed
+	// depth copies made by replay (CopySceneDepth): one storage per copy of a frame
+	std::vector<MTL::Texture *> copyStorage;
+	uint64_t copyFrame;
+	int copyCount;
 
 	MglTexture() : tex( NULL ), target( MT_2D ), width( 0 ), height( 0 ), depth( 0 ), levels( 0 ), maxLevelDefined( 0 ),
 		internalFormat( 0 ), pixelFormat( MTL::PixelFormatInvalid ), swizzle( 0 ), formatClass( MF_RGBA ), isDepth( false ),
 		minFilter( GL_NEAREST_MIPMAP_LINEAR ), magFilter( GL_LINEAR ), wrapS( GL_REPEAT ), wrapT( GL_REPEAT ), wrapR( GL_REPEAT ),
-		anisotropy( 1.0f ), lodBias( 0.0f ), maxLevel( 1000 ), border( 0 ), sampler( NULL ) {}
+		anisotropy( 1.0f ), lodBias( 0.0f ), maxLevel( 1000 ), border( 0 ), sampler( NULL ), copyFrame( ~0ull ), copyCount( 0 ) {}
 };
 
 struct MglBuffer {
@@ -421,6 +425,12 @@ int MipLevelCount( int w, int h, int d ) {
 }
 
 void ReleaseTextureStorage( MglTexture *t ) {
+	for ( MTL::Texture *storage : t->copyStorage ) {
+		if ( storage != t->tex ) {
+			GLMetal_ReleaseTexture( storage );
+		}
+	}
+	t->copyStorage.clear();
 	if ( t->tex ) {
 		GLMetal_ReleaseTexture( t->tex );
 		t->tex = NULL;
@@ -1279,8 +1289,7 @@ void DrawIndexed( GLsizei count, GLenum type, const GLvoid *indices ) {
 	if ( !enc ) {
 		return;
 	}
-	enc->drawIndexedPrimitives( MTL::PrimitiveTypeTriangle, (NS::UInteger)count,
-								indexSize == 2 ? MTL::IndexTypeUInt16 : MTL::IndexTypeUInt32, indexBuffer, indexOffset );
+	GLMetal_DrawIndexed( (NS::UInteger)count, indexSize == 2 ? MTL::IndexTypeUInt16 : MTL::IndexTypeUInt32, indexBuffer, indexOffset );
 }
 
 // ---- clears -------------------------------------------------------------------------------
@@ -1357,7 +1366,10 @@ void ClearBuffers( GLbitfield mask ) {
 		GLMetal_SetRenderPipelineState( pso );
 		GLMetal_SetVertexBuffer( buffer, offset, 0 );
 		GLMetal_SetSharedUniforms( gl.clearColor, 16, MGL_UNIFORM_VERTEX_SLOT, MGL_UNIFORM_FRAGMENT_SLOT );
-		enc->drawPrimitives( MTL::PrimitiveTypeTriangleStrip, (NS::UInteger)0, (NS::UInteger)4 );
+		if ( ds.depthWrite && sx <= 0 && sy <= 0 && sx + sw >= width && sy + sh >= height ) {
+			GLMetal_DepthBufferCleared();
+		}
+		GLMetal_Draw( MTL::PrimitiveTypeTriangleStrip, (NS::UInteger)0, (NS::UInteger)4 );
 	}
 	rasterDirty = true;
 }
@@ -1452,7 +1464,7 @@ void ImmFlush( void ) {
 
 	MTL::RenderCommandEncoder *enc = PrepareDraw( (int)out.size() );
 	if ( enc ) {
-		enc->drawPrimitives( prim, (NS::UInteger)0, (NS::UInteger)out.size() );
+		GLMetal_Draw( prim, (NS::UInteger)0, (NS::UInteger)out.size() );
 	}
 
 	gl.vertexArray = savedVertex;
@@ -1855,7 +1867,7 @@ void APIENTRY mgl_DrawArrays( GLenum mode, GLint first, GLsizei count ) {
 	}
 	MTL::RenderCommandEncoder *enc = PrepareDraw( first + count );
 	if ( enc ) {
-		enc->drawPrimitives( prim, (NS::UInteger)first, (NS::UInteger)count );
+		GLMetal_Draw( prim, (NS::UInteger)first, (NS::UInteger)count );
 	}
 }
 
@@ -1985,6 +1997,35 @@ bool EnsureCopyTarget( MglTexture *t, bool depth, int w, int h ) {
 	return EnsureTextureStorage( t, MT_2D, f, depth ? GL_DEPTH_COMPONENT24 : GL_RGB8, w, h, 1 );
 }
 
+// A depth copy made by replay runs before everything else of the frame, so a second copy in
+// a frame (another view) must not overwrite what the draws of the first one sample: the
+// texture object gets another storage for it.
+void CopySceneDepth( MglTexture *t, int x, int y, int w, int h, int xoff, int yoff ) {
+	if ( t->copyFrame != GLMetal_FrameSerial() ) {
+		t->copyFrame = GLMetal_FrameSerial();
+		t->copyCount = 0;
+	}
+	const int k = t->copyCount++;
+	bool replay = GLMetal_CanReplayDepth() && k < 8;
+	if ( replay ) {
+		if ( t->copyStorage.empty() ) {
+			t->copyStorage.push_back( t->tex );
+		}
+		while ( replay && (int)t->copyStorage.size() <= k ) {
+			MTL::Texture *storage = GLMetal_NewTexture( MTL::TextureType2D, t->pixelFormat, t->width, t->height, 1, t->levels, false, t->swizzle );
+			if ( storage ) {
+				t->copyStorage.push_back( storage );
+			} else {
+				replay = false;
+			}
+		}
+		if ( replay ) {
+			t->tex = t->copyStorage[k];
+		}
+	}
+	GLMetal_CopySceneToTexture( true, x, y, w, h, t->tex, xoff, yoff, replay );
+}
+
 void APIENTRY mgl_CopyTexImage2D( GLenum target, GLint level, GLenum internalFormat, GLint x, GLint y, GLsizei w, GLsizei h, GLint ) {
 	MglTexture *t = BoundTexture( target );
 	if ( !t || level != 0 || w <= 0 || h <= 0 ) {
@@ -1995,7 +2036,11 @@ void APIENTRY mgl_CopyTexImage2D( GLenum target, GLint level, GLenum internalFor
 	if ( !EnsureCopyTarget( t, depth, w, h ) ) {
 		return;
 	}
-	GLMetal_CopySceneToTexture( depth, x, y, w, h, t->tex, 0, 0 );
+	if ( depth ) {
+		CopySceneDepth( t, x, y, w, h, 0, 0 );
+	} else {
+		GLMetal_CopySceneToTexture( false, x, y, w, h, t->tex, 0, 0 );
+	}
 }
 
 void APIENTRY mgl_CopyTexSubImage2D( GLenum target, GLint level, GLint xoff, GLint yoff, GLint x, GLint y, GLsizei w, GLsizei h ) {
@@ -2006,7 +2051,11 @@ void APIENTRY mgl_CopyTexSubImage2D( GLenum target, GLint level, GLint xoff, GLi
 	if ( !EnsureCopyTarget( t, t->isDepth, t->width, t->height ) ) {
 		return;
 	}
-	GLMetal_CopySceneToTexture( t->isDepth, x, y, w, h, t->tex, xoff, yoff );
+	if ( t->isDepth ) {
+		CopySceneDepth( t, x, y, w, h, xoff, yoff );
+	} else {
+		GLMetal_CopySceneToTexture( false, x, y, w, h, t->tex, xoff, yoff );
+	}
 }
 
 void TexParameter( GLenum target, GLenum pname, float value ) {
@@ -2522,6 +2571,18 @@ extern "C" void MGL_Shutdown( void ) {
 	clearProgram = -1;
 	immVerts.clear();
 	GLMetal_Shutdown();
+}
+
+extern "C" float MGL_BeginParticleLayer( void ) {
+	if ( gl.polygonMode != GL_FILL || gl.alphaTest || ( gl.depthTest && gl.depthFunc != GL_ALWAYS ) ||
+		 ( gl.stencilTest && gl.stencilFunc != GL_ALWAYS ) ) {
+		return 0.0f;
+	}
+	return (float)GLMetal_BeginBlendLayer( CurrentBlendKey() );
+}
+
+extern "C" void MGL_EndParticleLayer( void ) {
+	GLMetal_EndBlendLayer();
 }
 
 extern "C" void MGL_SwapBuffers( void ) {
