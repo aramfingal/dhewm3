@@ -120,6 +120,14 @@ the depth replay, whose depth texture it reads). The target starts as (0,0,0,1):
 colour with the particle's own blend, alpha collects how much of the background is left.
 One rectangle in the scene pass then blends it over the scene (`colour + scene * alpha`).
 
+Smaller than the scene, the layer is upsampled with the scene depth (`layer_depth_fs`), the
+last depth copy of the frame, which is what the particles faded against. Each layer texel
+stands for the scene pixel at the centre of its block; of the four texels around a pixel
+only those whose scene depth is within 10% of the pixel's (as distance: depth is
+`1 - near / z`, so `1 - d` ratios are distance ratios) are blended, and if none is, the
+closest one is used. Without this, steam behind a nearer edge (a pipe, the weapon) bled a
+pixel or two onto it. Away from depth edges the result is the plain bilinear sample.
+
 - Only blends that add to the background or cover it by source alpha qualify (source
   `ONE`/`SRC_ALPHA`, destination `ONE`/`ONE_MINUS_SRC_ALPHA`); anything else is drawn as before.
 - Order is kept: any other draw into the scene ends the group collected so far. A frame can
@@ -131,7 +139,9 @@ One rectangle in the scene pass then blends it over the scene (`colour + scene *
 - `0` turns it off (what the harness compares with OpenGL), `1` is a full-size layer, `2`
   (default) half, `4` quarter size. The image differs slightly from `0`: about one 8-bit step
   in dense steam (the layer blends in floating point, the scene target rounds after every
-  quad), and at half size steam next to a nearer edge is a pixel softer.
+  quad). At half size against the full-size layer, at the owner's steam save (2560x1440):
+  48 pixels differ by more than 4 levels, at most 10 (3,338 and 56 with plain bilinear
+  upsampling); it costs about 4% of the frame rate there.
 
 ## What the GL layer implements
 

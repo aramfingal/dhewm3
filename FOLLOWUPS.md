@@ -94,10 +94,10 @@ Each item: where, approach, risk, how to verify.
 
 21. **Colour copies still end the scene pass** (`_currentRender`: heat haze, glass
     distortion). With 8 samples everything blended after one is slow, as depth copies were.
-22. **Particle layer** (`r_metalParticleLayer`): the upsampling is plain bilinear, so at
-    half size steam behind a nearer edge bleeds a pixel; a depth-aware upsample would fix
-    it. Only soft particles go into the layer; particles too small to be softened and
-    other blended surfaces (glass, decals) are drawn into the scene as before. At most 4
-    groups per frame.
+22. **Particle layer** (`r_metalParticleLayer`): only soft particles go into the layer;
+    particles too small to be softened and other blended surfaces (glass, decals) are drawn
+    into the scene as before. At most 4 groups per frame. The depth-aware upsample compares
+    one scene pixel per layer texel, so a thin object narrower than a texel block can still
+    be missed.
 23. **Soft particles are not depth tested** by design (the shader fades them), so steam
     behind a wall is still filled; about a quarter of the particle cost in the test spot.

@@ -148,6 +148,11 @@ surface) and discarding faded fragments (slower).
 
 Not verified: how the layer looks in play (a person at the screen), particle-heavy fights.
 
+Depth-aware upsampling of the layer (DESIGN.md): at half size, steam no longer bleeds over
+nearer edges. Same save, full-size layer against half-size in the same run: 3,338 pixels
+off by more than 4 levels (max 56) with bilinear upsampling, 48 (max 10) now. 1,172 ->
+1,120 fps there.
+
 ## Next
 
 - FOLLOWUPS.md: a visible-window test, a harness scenario for subviews and post-process
