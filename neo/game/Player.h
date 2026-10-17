@@ -265,7 +265,7 @@ public:
 	idUserInterface *		objectiveSystem;
 	bool					objectiveSystemOpen;
 
-	// armor mounted flashlight (g_mountedFlashlight); not saved
+	// armor mounted flashlight (g_mountedFlashlight); on/off kept in spawnArgs
 	renderLight_t			mountedLight;
 	qhandle_t				mountedLightHandle;
 	bool					mountedLightOn;

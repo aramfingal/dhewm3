@@ -117,7 +117,11 @@ HD pack also replaces). Game code only, base and RoE; `toggleFlashlight` command
 of its own. Harness scenario `flashlight_*` (off, on, off again): passes on OpenGL and Metal
 in alphalabs1 and erebus1, and the two renderers' images match.
 
-Not verified: by a person in play; the light is not saved in savegames (off after loading).
+Not verified: by a person in play.
+
+Kept in savegames and across levels (player spawnArgs, format unchanged). The scenario saves
+with the light on, turns it off and loads: the loaded view is brighter (fails without the
+change). Passes in alphalabs1 and erebus1 on Metal.
 
 ## Soft particles with multisampling (Metal)
 

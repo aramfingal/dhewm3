@@ -73,7 +73,8 @@ so it tests the original game data.
 `UpdateMountedFlashlight`): selecting the flashlight weapon (F in the base game, 1 in RoE)
 or the `toggleFlashlight` command switches a light on the player's armor instead of
 swapping the weapon, as in the BFG Edition. It is the hand flashlight's own beam, a
-projected light only drawn in the player's view. Single player only; 0 gives the hand
+projected light only drawn in the player's view. On/off is kept in savegames and across
+levels (player spawnArgs, so the savegame format is unchanged). Single player only; 0 gives the hand
 flashlight back. Harness scenario `flashlight_*`.
 
 ## Frame rate

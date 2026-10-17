@@ -2089,6 +2089,8 @@ void idPlayer::Restore( idRestoreGame *savefile ) {
 	if ( hud ) {
 		hud->SetStateString( "message", "" );
 	}
+
+	mountedLightOn = spawnArgs.GetBool( "mountedFlashlight" );
 }
 
 /*
@@ -2319,6 +2321,7 @@ void idPlayer::SavePersistantInfo( void ) {
 	inventory.GetPersistantData( playerInfo );
 	playerInfo.SetInt( "health", health );
 	playerInfo.SetInt( "current_weapon", currentWeapon );
+	playerInfo.SetBool( "mountedFlashlight", mountedLightOn );
 }
 
 /*
@@ -2340,6 +2343,7 @@ void idPlayer::RestorePersistantInfo( void ) {
 	if ( !gameLocal.isClient ) {
 		idealWeapon = spawnArgs.GetInt( "current_weapon", "1" );
 	}
+	mountedLightOn = spawnArgs.GetBool( "mountedFlashlight" );
 }
 
 /*
@@ -3649,8 +3653,10 @@ void idPlayer::PrevWeapon( void ) {
 
 	A light on the player's armor that works with every weapon, like the one of the
 	BFG Edition. The flashlight key switches it on and off instead of selecting the hand
-	flashlight. The light exists only in the render world: nothing about it is saved, and
-	after loading a game it is off.
+	flashlight. The light exists only in the render world. Whether it is on is kept in the
+	player's spawnArgs ("mountedFlashlight"), which savegames already hold, and in the
+	persistent info carried to the next level, so savegames keep their format: older ones
+	load with it off, and dhewm3 without it loads newer ones.
 
 ===============================================================================
 */
@@ -3676,6 +3682,7 @@ idPlayer::ToggleMountedFlashlight
 */
 void idPlayer::ToggleMountedFlashlight( void ) {
 	mountedLightOn = !mountedLightOn;
+	spawnArgs.SetBool( "mountedFlashlight", mountedLightOn );
 	// the click of the hand flashlight
 	const idSoundShader *click = declManager->FindSound( "flashlight_raise", false );
 	if ( click ) {

@@ -85,7 +85,7 @@ Each item: where, approach, risk, how to verify.
 
 ## Armor mounted flashlight
 
-18. **Not saved** in savegames (off after a load), no battery, not in multiplayer.
+18. **No battery**, not in multiplayer.
 19. **RoE key**: RoE's default.cfg has F on `_impulse11`, which is the BFG there (the
     flashlight is weapon 0, key 1). `bind f toggleFlashlight` gives F in RoE too.
 20. **The hand flashlight's melee attack** is not reachable while `g_mountedFlashlight` is 1.
