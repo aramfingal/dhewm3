@@ -2164,6 +2164,13 @@ bool idAI::StepDirection( float dir ) {
 
 		idVec3 ceilingPos = path.endPos;
 
+		// dhewm3: with a NaN origin (seen with lost souls in enpro) z never passes the
+		// ceiling and this loops forever; -ffinite-math-only lets the compiler assume
+		// the comparison is false only for real numbers
+		if ( FLOAT_IS_NAN( org.z ) || FLOAT_IS_NAN( ceilingPos.z ) ) {
+			return false;
+		}
+
 		for( z = org.z; z <= ceilingPos.z + 64.0f; z += 64.0f ) {
 			idVec3 start;
 			if ( z <= ceilingPos.z ) {
