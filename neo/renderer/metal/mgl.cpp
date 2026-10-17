@@ -2781,6 +2781,10 @@ extern "C" void MGL_EndParticleLayer( void ) {
 	GLMetal_EndBlendLayer();
 }
 
+extern "C" void MGL_EndMultisamplingAtNextCopy( void ) {
+	GLMetal_EndMultisamplingAtNextCopy();
+}
+
 extern "C" void MGL_SwapBuffers( void ) {
 	if ( initialized ) {
 		GLMetal_Present();

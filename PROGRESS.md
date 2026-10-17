@@ -157,6 +157,27 @@ nearer edges. Same save, full-size layer against half-size in the same run: 3,33
 off by more than 4 levels (max 56) with bilinear upsampling, 48 (max 10) now. 1,172 ->
 1,120 fps there.
 
+## Shader compiles at start-up (Metal)
+
+Pairs compiled by earlier runs are listed in `fs_savepath/metal_shaders.cache` and compiled
+at start-up on all cores (DESIGN.md, "Shader compiles"). With every compile forced cold
+(steam save, 8x MSAA): the level's first frames stalled 1,171 + 161 ms before, none now; the
+10 recorded pairs took 97 ms at start-up. Warm: under 1 ms. Harness full suite on Metal
+passes.
+
+## Heat haze with multisampling (Metal)
+
+After the main view's `_currentRender` copy the frame is finished without multisampling
+(`r_metalPostProcessSingleSample`, DESIGN.md). GPU time per frame (`r_metalFrameStats`, new
+`gpu` column), 2560x1440, 8x MSAA, three alternating runs while other apps were busy:
+
+| view (harness `special_*` heat haze) | before | after |
+|---|---|---|
+| hell1 | 10.6-11.0 ms | 6.2 ms |
+| mars_city1 | 6.3-6.4 ms | 4.55 ms |
+
+Screenshots of the two show no difference apart from animation and the fps counter.
+
 ## Next
 
 - FOLLOWUPS.md: a visible-window test, a harness scenario for subviews and post-process

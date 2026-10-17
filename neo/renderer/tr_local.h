@@ -1127,6 +1127,7 @@ void		GLimp_SwapBuffers( void );
 // layer smaller than the screen. Begin returns 0 or how many times smaller that layer is.
 float		GLimp_BeginParticleLayer( void );
 void		GLimp_EndParticleLayer( void );
+void		GLimp_EndMultisamplingAtNextCopy( void );
 // Calls the system specific swapbuffers routine, and may also perform
 // other system specific cvar checks that happen every frame.
 // This will not be called if 'r_drawBuffer GL_FRONT'

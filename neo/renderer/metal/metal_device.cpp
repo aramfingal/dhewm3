@@ -18,6 +18,7 @@ autoreleased and is retained here when it is kept across calls.
 #include <vector>
 #include <algorithm>
 #include <chrono>
+#include <atomic>
 #include <string.h>
 #include <limits.h>
 
@@ -61,6 +62,11 @@ static MTL::CommandBuffer         *s_cmdBuffer = nullptr;
 static MTL::RenderCommandEncoder  *s_encoder = nullptr;
 static bool                        s_frameBegun = false;
 static bool                        s_frameCleared = false;	// the scene pass has been opened once this frame
+// r_metalPostProcessSingleSample: the main view's _currentRender copy ends multisampling for the
+// rest of the frame (see GLMetal_EndMultisamplingAtNextCopy)
+static bool                        s_endMsaaAtNextCopy = false;
+static bool                        s_msaaEnded = false;
+static const uint32_t              PIPELINE_SINGLE_SAMPLE = 1u << 24;	// in a pipeline key's blendKey
 static bool                        s_frameHasWork = false;	// the frame command buffer has encoded work
 static bool                        s_firstFrame = true;
 static uint64_t                    s_frameSerial = 0;
@@ -582,6 +588,17 @@ void GLMetal_SetSharedUniforms( const void *bytes, size_t size, NS::UInteger ver
 // Shaders and pipelines
 // ============================================================================
 
+// GPU time of every command buffer, summed as they complete (r_metalFrameStats)
+static std::atomic<uint64_t> s_gpuNs( 0 );
+static void GLMetal_TrackGPUTime( MTL::CommandBuffer *cmd ) {
+	cmd->addCompletedHandler( []( MTL::CommandBuffer *done ) {
+		const double t = done->GPUEndTime() - done->GPUStartTime();
+		if ( t > 0.0 && t < 1.0 ) {
+			s_gpuNs += (uint64_t)( t * 1e9 );
+		}
+	} );
+}
+
 // Time spent compiling shaders and creating pipelines in the current frame (r_metalDebug 1
 // prints it), to find the hitches of first use.
 static double s_frameCompileSeconds = 0.0, s_framePipelineSeconds = 0.0;
@@ -732,7 +749,7 @@ static MTL::RenderPipelineState *GLMetal_CreatePipeline( int programId, const Me
 	} else {
 		MTL::RenderPipelineColorAttachmentDescriptor *colorAttachment = pipelineDesc->colorAttachments()->object( 0 );
 		colorAttachment->setPixelFormat( s_colorPixelFormat );
-		pipelineDesc->setRasterSampleCount( (NS::UInteger)s_sampleCount );
+		pipelineDesc->setRasterSampleCount( ( blendKey & PIPELINE_SINGLE_SAMPLE ) ? 1 : (NS::UInteger)s_sampleCount );
 		ConfigureBlendState( colorAttachment, blendKey );
 	}
 
@@ -755,6 +772,9 @@ MTL::RenderPipelineState *GLMetal_GetPipeline( int programId, const MetalVertexL
 	(void)lines;
 	if ( programId < 0 || programId >= (int)s_programs.size() ) {
 		return nullptr;
+	}
+	if ( s_msaaEnded ) {
+		blendKey |= PIPELINE_SINGLE_SAMPLE;
 	}
 	PipelineCacheKey key = { programId, blendKey, layoutHash };
 	if ( !( key == s_curPipelineKey ) ) {
@@ -1170,7 +1190,7 @@ static bool GLMetal_EnsureLayerCompositePipeline( void ) {
 // Returns the scale of the layer (1, 2, 4) if the draws that follow, with this blend state,
 // will be collected in a layer, or 0: then they are drawn as usual.
 int GLMetal_BeginBlendLayer( uint32_t blendKey ) {
-	if ( s_layerScale <= 0 || s_layerActive || !s_encoder || s_depthReplayFrame != s_frameSerial ) {
+	if ( s_layerScale <= 0 || s_layerActive || !s_encoder || s_depthReplayFrame != s_frameSerial || s_msaaEnded ) {
 		return 0;
 	}
 	// blends that only add to the background or cover it by the source alpha
@@ -1252,6 +1272,7 @@ static void GLMetal_FlushBlendLayer( void ) {
 	if ( enc ) {
 		GLMetal_ReplayDraws( enc, s_layerDraws, s_layerTargetScale, false, s_layerWidth, s_layerHeight );
 		enc->endEncoding();
+		GLMetal_TrackGPUTime( pre );
 		pre->commit();
 
 		MetalDepthStencilKey ds;
@@ -1481,14 +1502,22 @@ static MTL::BlitCommandEncoder *GLMetal_GetUploadBlitEncoder( void ) {
 // in the middle of a frame keeps everything, because the pass that follows loads it. The last
 // pass of a frame only has to leave the colour image: storing the samples of all three
 // attachments is a large part of the cost of a multisampled frame.
-static void GLMetal_EndEncoderIfNeeded( bool frameEnd = false ) {
+// frameEnd: nothing is drawn into this pass's attachments again this frame.
+// endMultisampling: the samples are resolved and dropped; the rest of the frame is drawn into
+// the single-sample targets (GLMetal_EndMultisamplingAtNextCopy).
+static void GLMetal_EndEncoderIfNeeded( bool frameEnd = false, bool endMultisampling = false ) {
 	if ( !s_encoder ) {
 		return;
 	}
 	s_layerActive = false;
 	GLMetal_FlushBlendLayer();
-	const bool msaa = ( s_sampleCount > 1 );
-	if ( frameEnd ) {
+	const bool msaa = ( s_sampleCount > 1 && !s_msaaEnded );
+	if ( msaa && endMultisampling ) {
+		s_encoder->setColorStoreAction( MTL::StoreActionMultisampleResolve, 0 );
+		s_encoder->setDepthStoreAction( MTL::StoreActionMultisampleResolve );
+		s_encoder->setStencilStoreAction( MTL::StoreActionMultisampleResolve );
+		s_msaaEnded = true;
+	} else if ( frameEnd ) {
 		s_encoder->setColorStoreAction( msaa ? MTL::StoreActionMultisampleResolve : MTL::StoreActionStore, 0 );
 		s_encoder->setDepthStoreAction( MTL::StoreActionDontCare );
 		s_encoder->setStencilStoreAction( MTL::StoreActionDontCare );
@@ -1571,6 +1600,16 @@ static bool GLMetal_ClipToScene( int &srcX, int &srcY, int &width, int &height, 
 	return width > 0 && height > 0;
 }
 
+// The next colour copy is the main view's _currentRender copy: after it only post-process
+// surfaces (heat haze, glass distortion) and 2D are drawn. With multisampling a copy ends the
+// scene pass, and opening it again loads every sample of colour, depth and stencil, which with
+// 8 samples costs more than the surfaces drawn after it. So the samples are resolved and
+// dropped there, and the rest of the frame is drawn without multisampling: post-process
+// surfaces get no antialiased edges, which their soft masks mostly hide.
+void GLMetal_EndMultisamplingAtNextCopy( void ) {
+	s_endMsaaAtNextCopy = s_sampleCount > 1 && !s_msaaEnded && MetalHost_CvarInt( "r_metalPostProcessSingleSample" ) != 0;
+}
+
 void GLMetal_CopySceneToTexture( bool depth, int srcX, int srcY, int width, int height,
 								 MTL::Texture *dst, int dstX, int dstY, bool replay ) {
 	if ( !dst || !s_sceneColor || !GLMetal_ClipToScene( srcX, srcY, width, height, dstX, dstY ) ) {
@@ -1606,10 +1645,18 @@ void GLMetal_CopySceneToTexture( bool depth, int srcX, int srcY, int width, int 
 					blit->copyFromBuffer( s_captureBuffer, 0, (NS::UInteger)width * 4, (NS::UInteger)bytes, size, dst, 0, 0, dstOrigin );
 					blit->endEncoding();
 				}
+				GLMetal_TrackGPUTime( pre );
 				pre->commit();
 				s_depthReplayFrame = s_frameSerial;
 				return;
 			}
+		}
+	}
+	if ( !depth ) {
+		const bool endMsaa = s_endMsaaAtNextCopy;
+		s_endMsaaAtNextCopy = false;
+		if ( endMsaa && s_encoder ) {
+			GLMetal_EndEncoderIfNeeded( false, true );
 		}
 	}
 	MTL::CommandBuffer *cmd = GLMetal_CommandBufferForBlit();
@@ -1644,6 +1691,7 @@ void GLMetal_FlushAndWait( void ) {
 	// the recorded depth draws use buffers and textures this command buffer kept alive
 	s_depthRecordValid = false;
 	s_depthDraws.clear();
+	GLMetal_TrackGPUTime( s_cmdBuffer );
 	s_cmdBuffer->commit();
 	s_cmdBuffer->waitUntilCompleted();
 	if ( s_cmdBuffer->status() == MTL::CommandBufferStatusError ) {
@@ -1771,7 +1819,7 @@ static bool GLMetal_EnsureEncoder( void ) {
 	// the first pass of a frame clears; a pass reopened after a blit loads what is there
 	const MTL::LoadAction load = s_frameCleared ? MTL::LoadActionLoad : MTL::LoadActionClear;
 	MTL::RenderPassDescriptor *desc = MTL::RenderPassDescriptor::renderPassDescriptor();
-	const bool msaa = ( s_sampleCount > 1 );
+	const bool msaa = ( s_sampleCount > 1 && !s_msaaEnded );
 	const MTL::StoreAction store = MTL::StoreActionUnknown;	// chosen when the pass ends
 	desc->colorAttachments()->object( 0 )->setTexture( msaa ? s_msaaColor : s_sceneColor );
 	desc->colorAttachments()->object( 0 )->setLoadAction( load );
@@ -1878,9 +1926,9 @@ static void GLMetal_FrameStatsBeginFrame( void ) {
 		const double frameMs = s_frameStats.frameNs / n;
 		const double slotMs = s_frameStats.slotWaitNs / n;
 		const double drawableMs = s_frameStats.drawableWaitNs / n;
-		MetalHost_Printf( "[Metal] frame stats (%d frames, %d presented): %.3f ms/frame = %.3f waiting for GPU slot + %.3f waiting for drawable + %.3f other; backend %.3f ms\n",
+		MetalHost_Printf( "[Metal] frame stats (%d frames, %d presented): %.3f ms/frame = %.3f waiting for GPU slot + %.3f waiting for drawable + %.3f other; backend %.3f ms; gpu %.3f ms\n",
 						  s_frameStats.frames, s_frameStats.presented, frameMs, slotMs, drawableMs, frameMs - slotMs - drawableMs,
-						  s_frameStats.backendNs / n );
+						  s_frameStats.backendNs / n, s_gpuNs.exchange( 0 ) / n );
 		s_frameStats.frames = 0;
 		s_frameStats.presented = 0;
 		s_frameStats.frameNs = s_frameStats.slotWaitNs = s_frameStats.drawableWaitNs = s_frameStats.backendNs = 0;
@@ -2124,6 +2172,8 @@ bool GLMetal_BeginFrame( void ) {
 	}
 	s_layerTargetsUsed = 0;
 	s_layerActive = false;
+	s_msaaEnded = false;
+	s_endMsaaAtNextCopy = false;
 	s_lastDepthCopy.tex = nullptr;
 	return true;
 }
@@ -2182,6 +2232,7 @@ void GLMetal_Present( void ) {
 	if ( s_drawable ) {
 		cmdBuffer->presentDrawable( s_drawable );
 	}
+	GLMetal_TrackGPUTime( cmdBuffer );
 	cmdBuffer->commit();
 
 	if ( s_firstFrame ) {

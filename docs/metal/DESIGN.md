@@ -105,6 +105,24 @@ because the next pass loads it. The last pass of a frame only resolves colour an
 samples, depth and stencil. Storing them was more than half the cost of an 8-sample frame at
 2560x1440 (1,026 fps before, 2,217 after, in a view without particles).
 
+## Heat haze with multisampling (`r_metalPostProcessSingleSample`)
+
+Post-process surfaces (heat haze, glass distortion) read `_currentRender`, a copy of the
+scene made right before the first of them. A copy ends the scene pass; with multisampling,
+opening it again loads every sample of colour, depth and stencil, and everything blended
+after that is slow (the same cost as depth copies had). After the main view's copy only
+post-process surfaces and 2D are drawn (every other sort comes first, fog lights included).
+So the back end calls `GLimp_EndMultisamplingAtNextCopy` before that copy when the view is
+not a subview, and the device layer ends the pass with resolve-only store actions for colour,
+depth and stencil (`GLMetal_EndEncoderIfNeeded( false, true )`): the samples go into the
+single-sample scene textures, which the rest of the frame draws into. Pipelines made then have
+one sample (`PIPELINE_SINGLE_SAMPLE` in the cache key), the particle layer is off, and the
+frame ends with a plain store.
+
+What is lost: antialiased edges of the post-process surfaces themselves (their masks are soft)
+and of anything 3D drawn after the main view. Copies in subviews keep the old way.
+`r_metalPostProcessSingleSample 0` turns it off.
+
 ## Soft particles in a layer (`r_metalParticleLayer`)
 
 Steam and smoke are stacks of large blended quads, and filling them into every sample of the

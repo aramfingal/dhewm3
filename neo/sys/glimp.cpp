@@ -1238,6 +1238,22 @@ void GLimp_EndParticleLayer() {
 #endif
 }
 
+/*
+===================
+GLimp_EndMultisamplingAtNextCopy
+
+The next copy of the framebuffer is the main view's _currentRender copy. The Metal backend
+then draws the rest of the frame without multisampling (r_metalPostProcessSingleSample).
+===================
+*/
+void GLimp_EndMultisamplingAtNextCopy() {
+#if defined(D3_METAL)
+	if ( usingMetal ) {
+		MGL_EndMultisamplingAtNextCopy();
+	}
+#endif
+}
+
 void GLimp_SwapBuffers() {
 #if defined(D3_METAL)
 	if ( usingMetal ) {

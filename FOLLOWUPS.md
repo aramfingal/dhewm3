@@ -97,8 +97,11 @@ Each item: where, approach, risk, how to verify.
 
 ## Multisampling (Metal)
 
-21. **Colour copies still end the scene pass** (`_currentRender`: heat haze, glass
-    distortion). With 8 samples everything blended after one is slow, as depth copies were.
+21. **Colour copies in subviews still end the multisampled scene pass and load every sample
+    again** (a mirror or remote camera showing heat haze). The main view's copy drops
+    multisampling instead (`r_metalPostProcessSingleSample`), so anything drawn after it is
+    not antialiased: post-process surfaces, 2D, and a 3D view a GUI draws after the main view
+    (rare). A full depth clear could bring multisampling back for such a view.
 22. **Particle layer** (`r_metalParticleLayer`): only soft particles go into the layer;
     particles too small to be softened and other blended surfaces (glass, decals) are drawn
     into the scene as before. At most 4 groups per frame. The depth-aware upsample compares

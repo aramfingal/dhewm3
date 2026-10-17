@@ -30,6 +30,7 @@ void	MGL_Resize( int width, int height );
 // pixels of that target.
 float	MGL_BeginParticleLayer( void );
 void	MGL_EndParticleLayer( void );
+void	MGL_EndMultisamplingAtNextCopy( void );
 void	( *MGL_GetProcAddress( const char *name ) )( void );
 
 #ifdef __cplusplus
