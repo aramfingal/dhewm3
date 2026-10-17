@@ -125,6 +125,7 @@ MTL::RenderPipelineState *GLMetal_GetPipeline( int programId, const MetalVertexL
 
 // ---- shaders -------------------------------------------------------------------------------
 
+MTL::Library *GLMetal_CompileLibraryAnyThread( const char *mslSource );
 MTL::Library *GLMetal_LoadShaderLibraryFromSource( const char *mslSource, const char *label );
 
 // ---- textures and samplers -----------------------------------------------------------------

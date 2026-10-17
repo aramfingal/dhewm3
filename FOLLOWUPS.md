@@ -30,6 +30,10 @@ Each item: where, approach, risk, how to verify.
    which uses real time, not game time). Approach: find it with `g_showHud 0` and by
    disabling GUIs, or drop the level from the image comparison; `demoshots_demo1` is the
    exact comparison. Verify: three runs of one renderer match.
+4b. **`uncapped_intro_base_mars_city1` on OpenGL** gave a black first screenshot and no frame
+   rate reports three times on 2026-10-17, with the `master` build too, while other apps
+   (GeForce NOW, Steam) were busy; Metal passed. Not looked into. Uncapped frame rates were
+   a quarter of the usual then, on both builds: compare builds back to back, not with old runs.
 5. **A visible window has not been tested** (see PROGRESS.md). Check focus, input grab,
    `r_fullscreen`, resizing (`MGL_Resize` recreates the scene target) and `r_swapInterval 1`.
    With vsync off, `r_metalPresentHz -1` should keep the frame rate above the refresh rate;
@@ -39,9 +43,10 @@ Each item: where, approach, risk, how to verify.
    cache the layout per array state, copy client-memory index arrays only once per surface
    (dhewm3 has `r_useIndexBuffers`), prewarm pipelines. Measure with `r_metalFrameStats`.
    Verify: screenshots unchanged, backend ms lower.
-7. **Shader pairs are compiled on first use** (a hitch of some milliseconds each, about 40
-   pairs in a level). The OS caches them between runs. Approach: compile the pairs seen in
-   earlier runs at start-up, or asynchronously as in the ioq3 layer.
+7. **A shader pair no earlier run used is still compiled on first use**, 40-170 ms when the
+   system's Metal cache does not have it either (DESIGN.md, "Shader compiles"). Pipelines
+   are made on first use too (a few tenths of a millisecond each, a few ms when a level
+   starts); `MTLBinaryArchive` could keep them.
 8. **Not implemented in the GL layer** (logged once as "not implemented" when called):
    `glGetTexImage` / `glGetCompressedTexImage` (writing precompressed images), `glDrawPixels`
    and `glRasterPos` (some `r_show*` tools), colour-index textures, line width (always 1),

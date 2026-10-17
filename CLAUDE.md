@@ -111,7 +111,9 @@ Debugging: `r_metalDebug 1` prints every shader pair compiled, `2` also writes i
 `xcrun -sdk macosx metal -std=metal3.0 -c file.metal -o /dev/null`). A pair that fails to
 compile is written to `/tmp/mgl_failed_*.metal` and draws nothing. `r_metalFrameStats N`
 prints frame timing. Cvars: `r_metalHidden`, `r_metalNoPresent`, `r_metalPresentHz`,
-`r_metalNoDepthReplay` (depth copies, see DESIGN.md).
+`r_metalNoDepthReplay` (depth copies, see DESIGN.md). `fs_savepath/metal_shaders.cache` lists the
+shader pairs earlier runs compiled; they are compiled at start-up (DESIGN.md, "Shader
+compiles"). Deleting it is safe.
 
 `r_metalParticleLayer` (default 2, archived) draws soft particles into a half-size layer on
 Metal only, so Metal and OpenGL images differ where there is steam or smoke. The harness sets

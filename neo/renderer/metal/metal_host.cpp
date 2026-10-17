@@ -60,3 +60,7 @@ extern "C" int MetalHost_CvarInt( const char *name ) {
 extern "C" float MetalHost_CvarFloat( const char *name ) {
 	return cvarSystem->GetCVarFloat( name );
 }
+
+extern "C" const char *MetalHost_CvarString( const char *name ) {
+	return cvarSystem->GetCVarString( name );
+}

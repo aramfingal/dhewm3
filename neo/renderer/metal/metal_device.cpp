@@ -582,6 +582,29 @@ void GLMetal_SetSharedUniforms( const void *bytes, size_t size, NS::UInteger ver
 // Shaders and pipelines
 // ============================================================================
 
+// Time spent compiling shaders and creating pipelines in the current frame (r_metalDebug 1
+// prints it), to find the hitches of first use.
+static double s_frameCompileSeconds = 0.0, s_framePipelineSeconds = 0.0;
+static int s_frameCompiles = 0, s_framePipelines = 0;
+static double GLMetal_Seconds( void ) {
+	return std::chrono::duration<double>( std::chrono::steady_clock::now().time_since_epoch() ).count();
+}
+
+// From any thread: no printing, no statistics. NULL if it does not compile.
+MTL::Library *GLMetal_CompileLibraryAnyThread( const char *mslSource ) {
+	if ( !s_device || !mslSource || !mslSource[0] ) {
+		return nullptr;
+	}
+	NS::AutoreleasePool *pool = NS::AutoreleasePool::alloc()->init();
+	MTL::CompileOptions *options = MTL::CompileOptions::alloc()->init();
+	options->setPreserveInvariance( true );
+	NS::Error *error = nullptr;
+	MTL::Library *library = s_device->newLibrary( NS::String::string( mslSource, NS::UTF8StringEncoding ), options, &error );
+	options->release();
+	pool->release();
+	return library;
+}
+
 MTL::Library *GLMetal_LoadShaderLibraryFromSource( const char *mslSource, const char *label ) {
 	if ( !s_device || !mslSource || !mslSource[0] ) {
 		MetalHost_Warning( "[Metal] GLMetal_LoadShaderLibraryFromSource: invalid input or device not ready" );
@@ -597,7 +620,10 @@ MTL::Library *GLMetal_LoadShaderLibraryFromSource( const char *mslSource, const 
 	options->setPreserveInvariance( true );
 
 	NS::Error *error = nullptr;
+	const double t0 = GLMetal_Seconds();
 	MTL::Library *library = s_device->newLibrary( source, options, &error );
+	s_frameCompileSeconds += GLMetal_Seconds() - t0;
+	s_frameCompiles++;
 	options->release();
 
 	if ( !library ) {
@@ -711,7 +737,10 @@ static MTL::RenderPipelineState *GLMetal_CreatePipeline( int programId, const Me
 	}
 
 	NS::Error *error = nullptr;
+	const double t0 = GLMetal_Seconds();
 	MTL::RenderPipelineState *pipeline = s_device->newRenderPipelineState( pipelineDesc, &error );
+	s_framePipelineSeconds += GLMetal_Seconds() - t0;
+	s_framePipelines++;
 	pipelineDesc->release();
 	vertexDesc->release();
 	if ( !pipeline ) {
@@ -2033,6 +2062,8 @@ bool GLMetal_DeviceInit( void *layerPtr, int w, int h, int samples ) {
 	if ( !GLMetal_EnsureSceneTargets( w, h ) || !GLMetal_CreatePresentPipeline() ) {
 		return false;
 	}
+	// now rather than at the first soft particle: compiling it can take a tenth of a second
+	GLMetal_EnsureLayerCompositePipeline();
 	return true;
 }
 
@@ -2050,6 +2081,12 @@ void GLMetal_Resize( int w, int h ) {
 }
 
 bool GLMetal_BeginFrame( void ) {
+	if ( ( s_frameCompiles || s_framePipelines ) && MetalHost_CvarInt( "r_metalDebug" ) >= 1 ) {
+		MetalHost_Printf( "[Metal] frame %llu: %d shader compiles %.1f ms, %d pipelines %.1f ms\n", (unsigned long long)s_frameSerial,
+						  s_frameCompiles, s_frameCompileSeconds * 1000.0, s_framePipelines, s_framePipelineSeconds * 1000.0 );
+	}
+	s_frameCompileSeconds = s_framePipelineSeconds = 0.0;
+	s_frameCompiles = s_framePipelines = 0;
 	if ( s_frameBegun ) {
 		return true;
 	}

@@ -16,6 +16,7 @@ void	MetalHost_Warning( const char *fmt, ... ) __attribute__(( format( printf, 1
 void	MetalHost_FatalError( const char *fmt, ... ) __attribute__(( format( printf, 1, 2 ) ));
 int		MetalHost_CvarInt( const char *name );
 float	MetalHost_CvarFloat( const char *name );
+const char *MetalHost_CvarString( const char *name );
 
 // what glimp.cpp calls (declared again in sys/glimp.cpp)
 // returns the samples per pixel in use (>= 1), or 0 on failure

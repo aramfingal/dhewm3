@@ -15,6 +15,9 @@ See docs/metal/DESIGN.md.
 #include <vector>
 #include <unordered_map>
 #include <algorithm>
+#include <chrono>
+
+#include <dispatch/dispatch.h>
 
 #include <SDL_opengl.h>
 
@@ -775,7 +778,205 @@ void BuildPairKey( MglPairKey &key ) {
 	key.arrayMask = arrays;
 }
 
+// ============================================================================
+// Shader pair cache (metal_shaders.cache in fs_savepath)
+//
+// Compiling MSL costs 40-170 ms a pair when the system's Metal shader cache does not have it
+// (after an update of the game or of macOS), against well under a millisecond when it does.
+// Done on first use, that is a hitch in play. So the key of every pair that compiles is
+// appended to a file, and at start-up the pairs in it are compiled at once, in parallel.
+// A key names its programs by id and by a hash of their text, since program versions depend
+// on load order; records whose programs are gone or changed are skipped.
+// ============================================================================
+
+static const uint32_t PAIR_CACHE_MAGIC = 0x4b50474d;	// "MGPK"
+static const uint32_t PAIR_CACHE_VERSION = 1;
+static const int PAIR_CACHE_MAX_RECORDS = 4096;
+
+struct PairCacheRecord {
+	MglPairKey key;			// vp, fp NULL, versions 0
+	uint64_t vpHash, fpHash;
+};
+
+bool pairCacheLoaded = false;
+
+static uint64_t ProgramHash( const MglArbProgram *p ) {
+	if ( !p ) {
+		return 0;
+	}
+	uint64_t h = 1469598103934665603ull;
+	for ( unsigned char c : p->body ) {
+		h = ( h ^ c ) * 1099511628211ull;
+	}
+	return h | 1;	// never 0, which means no program
+}
+
+static std::string PairCachePath( void ) {
+	const char *base = MetalHost_CvarString( "fs_savepath" );
+	if ( !base || !base[0] ) {
+		return std::string();
+	}
+	return std::string( base ) + "/metal_shaders.cache";
+}
+
+static std::string PairKeyBytes( const MglPairKey &key ) {
+	MglPairKey bytes = key;
+	bytes.vp = NULL;
+	bytes.fp = NULL;
+	return std::string( (const char *)&bytes, sizeof( bytes ) );
+}
+
+static void AppendPairCache( const MglPairKey &key ) {
+	const std::string path = PairCachePath();
+	if ( path.empty() ) {
+		return;
+	}
+	FILE *f = fopen( path.c_str(), "ab" );
+	if ( !f ) {
+		return;
+	}
+	if ( ftell( f ) == 0 ) {
+		const uint32_t header[3] = { PAIR_CACHE_MAGIC, PAIR_CACHE_VERSION, (uint32_t)sizeof( PairCacheRecord ) };
+		fwrite( header, sizeof( header ), 1, f );
+	}
+	PairCacheRecord rec;
+	memset( &rec, 0, sizeof( rec ) );
+	rec.key = key;
+	rec.key.vp = NULL;
+	rec.key.fp = NULL;
+	rec.key.vpVersion = 0;
+	rec.key.fpVersion = 0;
+	rec.vpHash = ProgramHash( key.vp );
+	rec.fpHash = ProgramHash( key.fp );
+	fwrite( &rec, sizeof( rec ), 1, f );
+	fclose( f );
+}
+
+static bool ResolveCachedProgram( uint32_t id, uint64_t hash, bool fragment, const MglArbProgram *&prog, uint32_t &version ) {
+	prog = NULL;
+	version = 0;
+	if ( !hash ) {
+		return true;
+	}
+	auto it = programs.find( id );
+	if ( it == programs.end() || !it->second.valid || it->second.isFragment != fragment || ProgramHash( &it->second ) != hash ) {
+		return false;
+	}
+	prog = &it->second;
+	version = it->second.version;
+	return true;
+}
+
+struct PairCacheJob {
+	std::string msl, name;
+	MTL::Library *lib;
+};
+
+static void CompilePairCacheJob( void *context, size_t i ) {
+	PairCacheJob &job = ( (PairCacheJob *)context )[i];
+	job.lib = GLMetal_CompileLibraryAnyThread( job.msl.c_str() );
+}
+
+int AddPair( const std::string &k, MglPair &pair, MTL::Library *lib );
+
+// Compiles the pairs recorded by earlier runs. Called before the first pair is looked up,
+// when the engine has loaded its programs.
+static void LoadPairCache( void ) {
+	pairCacheLoaded = true;
+	const std::string path = PairCachePath();
+	FILE *f = path.empty() ? NULL : fopen( path.c_str(), "rb" );
+	if ( !f ) {
+		return;
+	}
+	const double t0 = std::chrono::duration<double>( std::chrono::steady_clock::now().time_since_epoch() ).count();
+	uint32_t header[3];
+	std::vector<PairCacheRecord> records;
+	if ( fread( header, sizeof( header ), 1, f ) == 1 && header[0] == PAIR_CACHE_MAGIC && header[1] == PAIR_CACHE_VERSION &&
+		 header[2] == sizeof( PairCacheRecord ) ) {
+		PairCacheRecord rec;
+		while ( (int)records.size() < PAIR_CACHE_MAX_RECORDS && fread( &rec, sizeof( rec ), 1, f ) == 1 ) {
+			records.push_back( rec );
+		}
+	}
+	fclose( f );
+
+	// unique records, in the order they were first seen; the file is written again with them
+	std::vector<PairCacheRecord> unique;
+	std::unordered_map<std::string, bool> seen;
+	std::vector<PairCacheJob> jobs;
+	std::vector<std::string> jobKeys;
+	std::vector<MglPair> jobPairs;
+	for ( const PairCacheRecord &rec : records ) {
+		const std::string recBytes( (const char *)&rec, sizeof( rec ) );
+		if ( seen.count( recBytes ) ) {
+			continue;
+		}
+		seen[recBytes] = true;
+		unique.push_back( rec );
+		MglPairKey key = rec.key;
+		if ( !ResolveCachedProgram( key.vpId, rec.vpHash, false, key.vp, key.vpVersion ) ||
+			 !ResolveCachedProgram( key.fpId, rec.fpHash, true, key.fp, key.fpVersion ) ) {
+			continue;
+		}
+		const std::string k = PairKeyBytes( key );
+		if ( pairIndex.count( k ) || std::find( jobKeys.begin(), jobKeys.end(), k ) != jobKeys.end() ) {
+			continue;
+		}
+		MglPair pair;
+		PairCacheJob job;
+		MglShader_Generate( key, pair, job.msl );
+		job.name = pair.name;
+		job.lib = NULL;
+		jobs.push_back( job );
+		jobKeys.push_back( k );
+		jobPairs.push_back( pair );
+	}
+	if ( unique.size() != records.size() ) {
+		f = fopen( path.c_str(), "wb" );
+		if ( f ) {
+			const uint32_t h[3] = { PAIR_CACHE_MAGIC, PAIR_CACHE_VERSION, (uint32_t)sizeof( PairCacheRecord ) };
+			fwrite( h, sizeof( h ), 1, f );
+			fwrite( unique.data(), sizeof( PairCacheRecord ), unique.size(), f );
+			fclose( f );
+		}
+	}
+	if ( jobs.empty() ) {
+		return;
+	}
+	// MTLDevice compiles libraries from any thread
+	dispatch_apply_f( jobs.size(), dispatch_get_global_queue( QOS_CLASS_USER_INITIATED, 0 ), jobs.data(), CompilePairCacheJob );
+	int built = 0;
+	for ( size_t i = 0; i < jobs.size(); i++ ) {
+		if ( jobs[i].lib ) {
+			AddPair( jobKeys[i], jobPairs[i], jobs[i].lib );
+			built++;
+		}
+	}
+	const double t1 = std::chrono::duration<double>( std::chrono::steady_clock::now().time_since_epoch() ).count();
+	MetalHost_Printf( "[Metal] compiled %d shader pairs from %s in %.0f ms\n", built, path.c_str(), ( t1 - t0 ) * 1000.0 );
+}
+
+// Makes a pair's program from its compiled library and adds it to the table (lib may be
+// NULL: the pair stays, without a program, so it is not compiled again).
+int AddPair( const std::string &k, MglPair &pair, MTL::Library *lib ) {
+	if ( lib ) {
+		MTL::Function *vs = lib->newFunction( NS::String::string( "mgl_vs", NS::UTF8StringEncoding ) );
+		MTL::Function *fs = lib->newFunction( NS::String::string( "mgl_fs", NS::UTF8StringEncoding ) );
+		pair.programId = GLMetal_RegisterProgram( pair.name.c_str(), vs, fs );
+		if ( vs ) vs->release();
+		if ( fs ) fs->release();
+		lib->release();
+	}
+	pairs.push_back( pair );
+	const int index = (int)pairs.size() - 1;
+	pairIndex[k] = index;
+	return index;
+}
+
 int LookupPair( void ) {
+	if ( !pairCacheLoaded ) {
+		LoadPairCache();
+	}
 	MglPairKey key;
 	BuildPairKey( key );
 
@@ -805,14 +1006,7 @@ int LookupPair( void ) {
 		}
 	}
 	MTL::Library *lib = GLMetal_LoadShaderLibraryFromSource( msl.c_str(), pair.name.c_str() );
-	if ( lib ) {
-		MTL::Function *vs = lib->newFunction( NS::String::string( "mgl_vs", NS::UTF8StringEncoding ) );
-		MTL::Function *fs = lib->newFunction( NS::String::string( "mgl_fs", NS::UTF8StringEncoding ) );
-		pair.programId = GLMetal_RegisterProgram( pair.name.c_str(), vs, fs );
-		if ( vs ) vs->release();
-		if ( fs ) fs->release();
-		lib->release();
-	} else {
+	if ( !lib ) {
 		// keep the source of a pair that does not compile, to look at
 		char path[256];
 		snprintf( path, sizeof( path ), "/tmp/mgl_failed_%s.metal", pair.name.c_str() );
@@ -823,9 +1017,10 @@ int LookupPair( void ) {
 			MetalHost_Warning( "[Metal] MSL of the failed pair written to %s", path );
 		}
 	}
-	pairs.push_back( pair );
-	const int index = (int)pairs.size() - 1;
-	pairIndex[k] = index;
+	const int index = AddPair( k, pair, lib );
+	if ( pairs[index].programId >= 0 ) {
+		AppendPairCache( key );
+	}
 	return index;
 }
 
@@ -2567,6 +2762,7 @@ extern "C" void MGL_Shutdown( void ) {
 	programs.clear();
 	pairs.clear();
 	pairIndex.clear();
+	pairCacheLoaded = false;
 	currentPair = -1;
 	clearProgram = -1;
 	immVerts.clear();

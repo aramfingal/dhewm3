@@ -143,6 +143,26 @@ pixel or two onto it. Away from depth edges the result is the plain bilinear sam
   48 pixels differ by more than 4 levels, at most 10 (3,338 and 56 with plain bilinear
   upsampling); it costs about 4% of the frame rate there.
 
+## Shader compiles
+
+A shader pair is MSL generated for one vertex/fragment combination, compiled with
+`newLibrary`. With the source in the system's Metal shader cache that takes well under a
+millisecond; without it (the first run after the generator or macOS changed, or after the
+system dropped its cache) 40-170 ms a pair, and loading a save stalled 1.2 s on first use.
+
+So `mgl.cpp` appends the key of every pair that compiles to `metal_shaders.cache` in
+`fs_savepath`, and before the first pair is looked up compiles all pairs in that file at once,
+on all cores (`dispatch_apply_f`, `GLMetal_CompileLibraryAnyThread`). A key names its ARB
+programs by GL id and a hash of their translated text instead of their version, which
+depends on load order; records whose programs are gone or changed are skipped, and
+duplicates are dropped when the file is read. The layer composite shader is compiled when
+the device starts. `r_metalDebug 1` prints, for each frame that compiled anything, how many
+shaders and pipelines it made and how long they took.
+
+Measured with every compile cold (alphalabs1 save, 8x MSAA): 10 recorded pairs compiled at
+start-up in 97 ms; the first frames of the level made no compiles (1,171 + 161 ms before).
+Warm: under 1 ms for all of them.
+
 ## What the GL layer implements
 
 The inventory (`GL_INVENTORY.md`) lists 108 entry points. Implemented groups: state
