@@ -112,9 +112,13 @@ Each item: where, approach, risk, how to verify.
 
 ## Game code
 
-24. **A lost soul can get a NaN origin** (enpro, 2026-10-17: "clip model outside world bounds
-    for entity 'monster_flying_lostsoul_15' at (nan nan nan)"). Stock code; cause not found
-    (probably the charge or fly movement). The game used to freeze in `idAI::StepDirection`
-    (fixed); the monster still stops moving and the warning repeats every tic. Other loops
-    over a NaN value could hang the same way under `-ffinite-math-only`; not audited.
-    Reproduce by setting a monster's origin to NaN from a temporary console command.
+24. **Flying monsters can get a NaN origin** (enpro, 2026-10-17: a lost soul, then a
+    cacodemon dodging plasma shots; "clip model outside world bounds ... at (nan nan nan)").
+    Stock code; cause not found. It froze the game in `idAI::StepDirection`, and a projectile
+    hitting such a monster asserted in `idClip::Motion`. Now `idPhysics_Monster::Evaluate`
+    puts a monster whose origin or velocity turns NaN back where it was and warns
+    "monster '...' got a NaN origin or velocity" with the velocity, push velocity and delta
+    it started the step with: that warning in a log says where the NaN comes from (a NaN
+    velocity means the AI's movement code). Reproduce by setting a monster's velocity to NaN
+    from a temporary console command. Other loops over a NaN value could hang under
+    `-ffinite-math-only`; not audited.

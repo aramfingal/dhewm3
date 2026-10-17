@@ -441,6 +441,11 @@ void idPhysics_Monster::DisableImpact( void ) {
 	noImpact = true;
 }
 
+// dhewm3: also true for infinity; works with -ffinite-math-only
+static bool VecIsNaN( const idVec3 &v ) {
+	return FLOAT_IS_NAN( v.x ) || FLOAT_IS_NAN( v.y ) || FLOAT_IS_NAN( v.z );
+}
+
 /*
 ================
 idPhysics_Monster::Evaluate
@@ -475,6 +480,9 @@ bool idPhysics_Monster::Evaluate( int timeStepMSec, int endTimeMSec ) {
 	}
 
 	ActivateContactEntities();
+
+	const monsterPState_t savedState = current;
+	const idVec3 savedDelta = delta;
 
 	// move the monster velocity into the frame of a pusher
 	current.velocity -= current.pushVelocity;
@@ -534,6 +542,26 @@ bool idPhysics_Monster::Evaluate( int timeStepMSec, int endTimeMSec ) {
 	// move the monster velocity back into the world frame
 	current.velocity += current.pushVelocity;
 	current.pushVelocity.Zero();
+
+	// dhewm3: flying monsters sometimes end up with a NaN origin; then everything that
+	// collides with them gets NaN too (a projectile hitting one asserts in idClip::Motion).
+	// Put the monster back where it was and say which input was bad.
+	if ( ( VecIsNaN( current.origin ) || VecIsNaN( current.velocity ) ) && !VecIsNaN( savedState.origin ) ) {
+		static int nanWarnings = 0;
+		if ( nanWarnings < 10 ) {
+			nanWarnings++;
+			gameLocal.Warning( "monster '%s' got a NaN origin or velocity; restoring its position "
+				"(velocity was (%s), push velocity (%s), delta (%s), fly %d, onGround %d, %d msec)",
+				self->name.c_str(), savedState.velocity.ToString( 2 ), savedState.pushVelocity.ToString( 2 ),
+				savedDelta.ToString( 2 ), fly, savedState.onGround, timeStepMSec );
+		}
+		current = savedState;
+		current.velocity.Zero();
+		current.pushVelocity.Zero();
+		delta.Zero();
+		clipModel->Link( gameLocal.clip, self, 0, current.origin, clipModel->GetAxis() );
+		return false;
+	}
 
 	if ( IsOutsideWorld() ) {
 		gameLocal.Warning( "clip model outside world bounds for entity '%s' at (%s)", self->name.c_str(), current.origin.ToString(0) );
