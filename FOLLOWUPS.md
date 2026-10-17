@@ -109,3 +109,12 @@ Each item: where, approach, risk, how to verify.
     be missed.
 23. **Soft particles are not depth tested** by design (the shader fades them), so steam
     behind a wall is still filled; about a quarter of the particle cost in the test spot.
+
+## Game code
+
+24. **A lost soul can get a NaN origin** (enpro, 2026-10-17: "clip model outside world bounds
+    for entity 'monster_flying_lostsoul_15' at (nan nan nan)"). Stock code; cause not found
+    (probably the charge or fly movement). The game used to freeze in `idAI::StepDirection`
+    (fixed); the monster still stops moving and the warning repeats every tic. Other loops
+    over a NaN value could hang the same way under `-ffinite-math-only`; not audited.
+    Reproduce by setting a monster's origin to NaN from a temporary console command.
