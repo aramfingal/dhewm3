@@ -127,6 +127,13 @@ void AssertFailed( const char *file, int line, const char *expression );
 #undef assert
 // DG: change assert to use ?: so I can use it in _alloca()/_alloca16() (MSVC didn't like if() in there)
 #define assert( X )			(X) ? 1 : (AssertFailed( __FILE__, __LINE__, #X ), 0)
+#elif !defined( NDEBUG )
+// dhewm3 fork: in builds with neither _DEBUG nor NDEBUG (RelWithDebInfo, which is what
+// gets played here) a failed assertion prints a warning once per call site and the game
+// carries on, as in a release build, instead of aborting.
+void AssertWarning( const char *file, int line, const char *expression );
+#undef assert
+#define assert( X )			( (X) ? 1 : (AssertWarning( __FILE__, __LINE__, #X ), 0) )
 #endif
 
 class idException {

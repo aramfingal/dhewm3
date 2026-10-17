@@ -550,3 +550,34 @@ void AssertFailed( const char *file, int line, const char *expression ) {
 #endif
 
 }
+
+#if !defined( _DEBUG ) && !defined( NDEBUG )
+/*
+==================
+AssertWarning
+
+dhewm3 fork: see assert in Lib.h
+==================
+*/
+void AssertWarning( const char *file, int line, const char *expression ) {
+	static const char *	seenFile[64];
+	static int			seenLine[64];
+	static int			numSeen = 0;
+
+	for ( int i = 0; i < numSeen; i++ ) {
+		if ( seenLine[i] == line && seenFile[i] == file ) {
+			return;
+		}
+	}
+	if ( numSeen < 64 ) {
+		seenFile[numSeen] = file;
+		seenLine[numSeen] = line;
+		numSeen++;
+	}
+	if ( idLib::common ) {
+		idLib::common->Warning( "assertion failed, continuing: %s(%d): '%s'", file, line, expression );
+	} else {
+		idLib::sys->DebugPrintf( "assertion failed, continuing: %s(%d): '%s'\n", file, line, expression );
+	}
+}
+#endif

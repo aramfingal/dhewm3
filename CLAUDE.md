@@ -57,6 +57,12 @@ code) are in `build/`. Run it with
 - With `SDL_MAC_BACKGROUND_APP` a crash exits after printing its backtrace instead of
   raising the signal again, so test runs never bring up the macOS crash dialog.
 - `SDL_MAC_BACKGROUND_APP` handling (above).
+- In RelWithDebInfo builds (neither `_DEBUG` nor `NDEBUG`, the default here) a failed
+  `assert` prints "assertion failed, continuing: ..." once per call site and the game carries
+  on as a release build would, instead of aborting (`neo/idlib/Lib.h`, `AssertWarning`).
+  Look for that warning in logs; the harness logs should have none.
+- A monster whose physics step leaves a NaN origin or velocity is put back where it was
+  (`idPhysics_Monster::Evaluate`, FOLLOWUPS.md 24).
 - arm64 macOS deployment target raised from 10.7 to 11.0 (`neo/CMakeLists.txt`).
 
 ## HD texture pack
