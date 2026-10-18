@@ -31,6 +31,10 @@ void	MGL_Resize( int width, int height );
 float	MGL_BeginParticleLayer( void );
 void	MGL_EndParticleLayer( void );
 void	MGL_EndMultisamplingAtNextCopy( void );
+int		MGL_ShadowMapAcquire( int size, int layers );
+void	MGL_ShadowMapBeginLayer( int map, int layer );
+void	MGL_ShadowMapEndLayer( void );
+void	MGL_ShadowSample( int map, const float *slots );
 void	( *MGL_GetProcAddress( const char *name ) )( void );
 
 #ifdef __cplusplus

@@ -170,6 +170,54 @@ pixel or two onto it. Away from depth edges the result is the plain bilinear sam
   48 pixels differ by more than 4 levels, at most 10 (3,338 and 56 with plain bilinear
   upsampling); it costs about 4% of the frame rate there.
 
+## Shadow maps (`r_shadowMaps`)
+
+Stencil shadow volumes cost what their volumes cover on screen, times the samples per pixel:
+next to a building outdoors in mc_underground, at 8x, they were four fifths of the frame. With
+`r_shadowMaps 1` (off by default, Metal only) a light's shadow casters are drawn into depth
+maps seen from the light, and its interactions are multiplied by how much light the maps let
+through. The code is `renderer/draw_shadowmap.cpp` (back end, shared) and the shadow parts of
+`metal_device.cpp`, `mgl.cpp` and `mgl_shader.cpp`.
+
+- **Casters.** The shadow volumes the front end makes anyway: their caps are the casters'
+  triangles that face away from the light, and `shadow.vp` sends the extruded vertexes to
+  infinity, the far plane seen from the light. A map therefore holds the nearest back face
+  of a caster, so lit faces do not shadow themselves and no depth bias is needed (the bias
+  cvars default to 0). dmap's precomputed volumes of the world (`r_useOptimizedShadows`) do
+  not have such caps: with shadow maps the world makes ordinary volumes instead
+  (`R_UseOptimizedShadows`), and changing `r_shadowMaps` makes all interactions again
+  (`R_ShadowMapsFrame`, as `regenerateWorld` does). Those volumes get their caster's bounds,
+  which culls them per map layer.
+- **Projections.** A light whose origin is inside its volume (point lights) gets six 90 degree
+  layers, one per axis direction; any other (projected lights; parallel lights are point
+  lights 100000 units away) one layer just wide enough for the volume. A light whose volume
+  reaches behind its origin keeps stencil shadows. `r_shadowMapSize` is the size for a light
+  that covers the screen, halved or quartered for smaller ones and halved per point light
+  layer.
+- **Self shadowing.** As with stencil shadows, surfaces with a noselfshadow material are
+  shadowed by the other casters only: they get a map without their group's casters
+  (`localShadows`).
+- **Drawing.** Each map is a `Depth32Float` 2D array texture, drawn layer by layer in a
+  command buffer of its own that is committed before the frame's
+  (`GLMetal_CommitShadowWork`), so the scene pass is never interrupted. While a layer is
+  drawn it is the current encoder: the scene's encoder and its cached state are put aside
+  (`GLMetal_ShadowMapBeginLayer`), pipelines get a depth-only variant
+  (`PIPELINE_SHADOW_TARGET`), and the GL layer sets the viewport and scissor to the map,
+  restoring the back end's afterwards (`MGL_ShadowMapBeginLayer`). Maps are pooled by size
+  and reused from frame to frame; Metal's hazard tracking orders a reuse.
+- **Lookup.** A pair drawn while `MGL_ShadowSample` is on gets `MglPairKey::shadow`: its
+  vertex function passes the eye space position, and its fragment function multiplies the
+  colour by `mgl_shadow()` (eye to world, layer by major axis, 3x3 comparison samples with
+  bilinear filtering, `r_shadowMapSoftness` texels apart). A surface facing away from the
+  light (flat normal from the position's derivatives) is in shadow, as stencil volumes have
+  it whatever the normal map says; not a noselfshadow one, which its own caps do not shadow. The parameters are `MU_SHADOW` uniforms; the map is
+  texture 15.
+
+Against stencil shadows (the harness with `--set r_shadowMaps 1`): edges are soft, and the
+view weapon gets the shadow at its own position instead of the camera's. `r_shadowMapDebug`
+1-4 prints each light's setup or shows the light let through, the map coordinates, the map
+depth.
+
 ## Shader compiles
 
 A shader pair is MSL generated for one vertex/fragment combination, compiled with

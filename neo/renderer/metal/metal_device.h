@@ -165,6 +165,14 @@ bool GLMetal_CanReplayDepth( void );
 // Blend layer: see metal_device.cpp. Begin returns the scale of the layer, or 0 for none.
 int GLMetal_BeginBlendLayer( uint32_t blendKey );
 void GLMetal_EndMultisamplingAtNextCopy( void );
+// Shadow maps (r_shadowMaps): see metal_device.cpp. Acquire returns a map no other light of
+// this frame uses, or -1; while a layer is begun, draws go into it.
+int GLMetal_ShadowMapAcquire( int size, int layers );
+void GLMetal_ShadowMapBeginLayer( int map, int layer );
+void GLMetal_ShadowMapEndLayer( void );
+bool GLMetal_ShadowMapLayerActive( void );
+MTL::Texture *GLMetal_ShadowMapTexture( int map );
+MTL::SamplerState *GLMetal_ShadowSampler( void );
 void GLMetal_EndBlendLayer( void );
 // A clear of the whole depth buffer is about to be drawn.
 void GLMetal_DepthBufferCleared( void );

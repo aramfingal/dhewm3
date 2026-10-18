@@ -1254,6 +1254,55 @@ void GLimp_EndMultisamplingAtNextCopy() {
 #endif
 }
 
+/*
+===================
+GLimp_ShadowMap*
+
+Shadow maps (r_shadowMaps, renderer/draw_shadowmap.cpp) exist only with the Metal backend:
+GLimp_ShadowMapAcquire returns -1 with OpenGL.
+===================
+*/
+int GLimp_ShadowMapAcquire( int size, int layers ) {
+#if defined(D3_METAL)
+	if ( usingMetal ) {
+		return MGL_ShadowMapAcquire( size, layers );
+	}
+#endif
+	return -1;
+}
+
+void GLimp_ShadowMapBeginLayer( int map, int layer ) {
+#if defined(D3_METAL)
+	if ( usingMetal ) {
+		MGL_ShadowMapBeginLayer( map, layer );
+	}
+#endif
+}
+
+void GLimp_ShadowMapEndLayer() {
+#if defined(D3_METAL)
+	if ( usingMetal ) {
+		MGL_ShadowMapEndLayer();
+	}
+#endif
+}
+
+void GLimp_ShadowSample( int map, const float *slots ) {
+#if defined(D3_METAL)
+	if ( usingMetal ) {
+		MGL_ShadowSample( map, slots );
+	}
+#endif
+}
+
+bool GLimp_HasShadowMaps() {
+#if defined(D3_METAL)
+	return usingMetal;
+#else
+	return false;
+#endif
+}
+
 void GLimp_SwapBuffers() {
 #if defined(D3_METAL)
 	if ( usingMetal ) {

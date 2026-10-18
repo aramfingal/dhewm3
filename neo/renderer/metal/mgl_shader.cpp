@@ -32,7 +32,8 @@ uint32_t MglShader_FragmentVaryings( const MglPairKey &key ) {
 // current value).
 uint32_t MglShader_VertexAttribs( const MglPairKey &key ) {
 	if ( key.vp ) {
-		return key.vp->attribsRead | ( key.vp->positionInvariant ? 1u : 0u );
+		// a shadowed pair also needs the position for the shadow map lookup
+		return key.vp->attribsRead | ( ( key.vp->positionInvariant || key.shadow ) ? 1u : 0u );
 	}
 	const uint32_t reads = MglShader_FragmentVaryings( key );
 	uint32_t a = 1u;
@@ -220,6 +221,11 @@ void VertexStage( const MglPairKey &key, Builder &b, uint32_t fsReads, std::stri
 
 	// GL clip space to Metal's; the image is rendered upside down (docs/metal/DESIGN.md)
 	body += "\tV2F o;\n\to.position = float4( o_pos.x, -o_pos.y, ( o_pos.z + o_pos.w ) * 0.5, o_pos.w );\n";
+	if ( key.shadow ) {
+		// eye space position, for the shadow map lookup in the fragment function
+		body += "\to.shw = float4( dot( " + b.U( MU_MATRIX_ROW, MM_MODELVIEW, 0 ) + ", a0 ), dot( "
+				+ b.U( MU_MATRIX_ROW, MM_MODELVIEW, 1 ) + ", a0 ), dot( " + b.U( MU_MATRIX_ROW, MM_MODELVIEW, 2 ) + ", a0 ), 1.0 );\n";
+	}
 	// OpenGL clamps vertex colours to [0,1] before they are interpolated, whether they come
 	// from the fixed-function pipeline or a vertex program (materials do use colours above 1)
 	if ( fsReads & MV_COLOR0 ) body += "\to.col0 = saturate( o_col0 );\n";
@@ -231,6 +237,7 @@ void VertexStage( const MglPairKey &key, Builder &b, uint32_t fsReads, std::stri
 	body += "\treturn o;\n";
 
 	msl += "struct V2F {\n\tfloat4 position [[position, invariant]];\n";
+	if ( key.shadow ) msl += "\tfloat4 shw;\n";
 	if ( fsReads & MV_COLOR0 ) msl += "\tfloat4 col0;\n";
 	if ( fsReads & MV_COLOR1 ) msl += "\tfloat4 col1;\n";
 	if ( fsReads & MV_FOG ) msl += "\tfloat4 fog;\n";
@@ -367,6 +374,17 @@ void FragmentStage( const MglPairKey &key, Builder &b, uint32_t fsReads, std::st
 		body += "\tr_col = c;\n";
 	}
 
+	if ( key.shadow ) {
+		// the slots are requested in order and no other stage uses MU_SHADOW, so they are adjacent
+		std::string first;
+		for ( int i = 0; i < MGL_SHADOW_SLOTS; i++ ) {
+			const std::string slot = b.U( MU_SHADOW, 0, i );
+			if ( i == 0 ) first = slot;
+		}
+		body += "\tif ( ( &" + first + " )[4].w > 1.5 ) r_col = mgl_shadow_debug( in.shw, &" + first + ", mgl_sm, mgl_ss );\n"
+				"\telse r_col.rgb *= mgl_shadow( in.shw, &" + first + ", mgl_sm, mgl_ss );\n";
+	}
+
 	if ( key.alphaFunc != MA_OFF && key.alphaFunc != MA_ALWAYS ) {
 		static const char *ops[] = { "", "", "<", "==", "<=", ">", "!=", ">=", "" };
 		if ( key.alphaFunc == MA_NEVER ) {
@@ -392,10 +410,75 @@ void FragmentStage( const MglPairKey &key, Builder &b, uint32_t fsReads, std::st
 		else if ( b.pair.texTarget[i] == MT_3D ) type = "texture3d<float>";
 		msl += std::string( ", " ) + type + " t" + Num( i ) + " [[texture(" + Num( i ) + ")]], sampler s" + Num( i ) + " [[sampler(" + Num( i ) + ")]]";
 	}
+	if ( key.shadow ) {
+		msl += ", depth2d_array<float> mgl_sm [[texture(" + Num( MGL_SHADOW_TEXTURE_UNIT ) + ")]], sampler mgl_ss [[sampler(" + Num( MGL_SHADOW_TEXTURE_UNIT ) + ")]]";
+	}
 	msl += " ) {\n" + body + "}\n";
 }
 
 } // namespace
+
+// How much of the light reaches a point (0..1), from the shadow map of the light
+// (draw_shadowmap.cpp). `e` is the eye space position, `sv` the MGL_SHADOW_* slots.
+// A point light has six layers, one per axis direction; other lights one.
+static const char *kShadowMSL =
+	"static inline float mgl_shadow( float4 e, constant float4 *sv, depth2d_array<float> sm, sampler ss ) {\n"
+	"\tfloat4 w = float4( dot( sv[0], e ), dot( sv[1], e ), dot( sv[2], e ), 1.0 );\n"
+	"\tuint layer = 0;\n"
+	"\tif ( sv[3].x > 1.5 ) {\n"
+	"\t\tfloat3 d = w.xyz - sv[4].xyz;\n"
+	"\t\tfloat3 a = abs( d );\n"
+	"\t\tif ( a.x >= a.y && a.x >= a.z ) layer = d.x >= 0.0 ? 0 : 1;\n"
+	"\t\telse if ( a.y >= a.z ) layer = d.y >= 0.0 ? 2 : 3;\n"
+	"\t\telse layer = d.z >= 0.0 ? 4 : 5;\n"
+	"\t}\n"
+	// As with stencil shadows, whose caps are the triangles that face away from the light, a
+	// surface facing away from the light is in shadow, whatever its normal map says. The flat
+	// normal comes from the position's derivatives, turned towards the viewer (sv[0..2].w is
+	// the eye's position).
+	"\tfloat3 n = cross( dfdx( w.xyz ), dfdy( w.xyz ) );\n"
+	"\tif ( dot( n, float3( sv[0].w, sv[1].w, sv[2].w ) - w.xyz ) < 0.0 ) n = -n;\n"
+	"\tif ( sv[5].x > 0.5 && dot( n, sv[4].xyz - w.xyz ) <= 0.0 ) return 0.0;\n"
+	"\tconstant float4 *m = sv + 6 + 4 * layer;\n"
+	"\tfloat4 c = float4( dot( m[0], w ), dot( m[1], w ), dot( m[2], w ), dot( m[3], w ) );\n"
+	"\tif ( c.w <= 0.0 ) return 1.0;\n"
+	"\tfloat3 p = c.xyz / c.w;\n"
+	"\tif ( abs( p.x ) > 1.0 || abs( p.y ) > 1.0 || p.z > 1.0 ) return 1.0;\n"
+	// the shadow pass's vertex functions negate y and map z from [-1,1] to [0,1] as every other
+	// pass does, so OpenGL's y = 1 is the last row of the map and z/w = 1 the depth 1
+	"\tfloat2 uv = p.xy * 0.5 + 0.5;\n"
+	"\tfloat ref = p.z * 0.5 + 0.5 - sv[3].w;\n"
+	"\tfloat r = sv[3].y * sv[3].z;\n"
+	"\tif ( r <= 0.0 ) return sm.sample_compare( ss, uv, layer, ref );\n"
+	// 3x3 comparisons with bilinear filtering: a smooth edge about 2r wide
+	"\tfloat lit = 0.0;\n"
+	"\tfor ( int y = -1; y <= 1; y++ ) {\n"
+	"\t\tfor ( int x = -1; x <= 1; x++ ) {\n"
+	"\t\t\tlit += sm.sample_compare( ss, uv + float2( x, y ) * r, layer, ref );\n"
+	"\t\t}\n"
+	"\t}\n"
+	"\treturn lit * ( 1.0 / 9.0 );\n"
+	"}\n"
+	// r_shadowMapDebug 2: the shadow factor, 3: map coordinates and reference depth, 4: map depth
+	"static inline float4 mgl_shadow_debug( float4 e, constant float4 *sv, depth2d_array<float> sm, sampler ss ) {\n"
+	"\tif ( sv[4].w < 2.5 ) { float s = mgl_shadow( e, sv, sm, ss ); return float4( s, s, s, 1.0 ) * 0.25; }\n"
+	"\tfloat4 w = float4( dot( sv[0], e ), dot( sv[1], e ), dot( sv[2], e ), 1.0 );\n"
+	"\tuint layer = 0;\n"
+	"\tif ( sv[3].x > 1.5 ) {\n"
+	"\t\tfloat3 d = w.xyz - sv[4].xyz; float3 a = abs( d );\n"
+	"\t\tif ( a.x >= a.y && a.x >= a.z ) layer = d.x >= 0.0 ? 0 : 1;\n"
+	"\t\telse if ( a.y >= a.z ) layer = d.y >= 0.0 ? 2 : 3;\n"
+	"\t\telse layer = d.z >= 0.0 ? 4 : 5;\n"
+	"\t}\n"
+	"\tconstant float4 *m = sv + 6 + 4 * layer;\n"
+	"\tfloat4 c = float4( dot( m[0], w ), dot( m[1], w ), dot( m[2], w ), dot( m[3], w ) );\n"
+	"\tfloat3 p = c.xyz / c.w;\n"
+	"\tfloat2 uv = p.xy * 0.5 + 0.5;\n"
+	"\tif ( sv[4].w < 3.5 ) return float4( uv, p.z * 0.5 + 0.5, 1.0 ) * 0.25;\n"
+	"\tuint2 t = uint2( saturate( uv ) * float2( sm.get_width() - 1, sm.get_height() - 1 ) );\n"
+	"\tfloat z = sm.read( t, layer );\n"
+	"\treturn float4( z, fract( z * 64.0 ), fract( z * 4096.0 ), 1.0 );\n"
+	"}\n";
 
 void MglShader_Generate( const MglPairKey &key, MglPair &out, std::string &msl ) {
 	out.programId = -1;
@@ -403,7 +486,8 @@ void MglShader_Generate( const MglPairKey &key, MglPair &out, std::string &msl )
 	out.attribMask = 0;
 	out.texMask = 0;
 	memset( out.texTarget, 0, sizeof( out.texTarget ) );
-	out.name = ( key.vp ? "vp" + Num( (int)key.vpId ) : std::string( "ff" ) ) + "+" + ( key.fp ? "fp" + Num( (int)key.fpId ) : std::string( "ff" ) );
+	out.shadow = key.shadow;
+	out.name = std::string( key.shadow ? "sh_" : "" ) + ( key.vp ? "vp" + Num( (int)key.vpId ) : std::string( "ff" ) ) + "+" + ( key.fp ? "fp" + Num( (int)key.fpId ) : std::string( "ff" ) );
 
 	Builder b( out );
 	const uint32_t fsReads = MglShader_FragmentVaryings( key );
@@ -416,6 +500,9 @@ void MglShader_Generate( const MglPairKey &key, MglPair &out, std::string &msl )
 		  "\tfloat d = max( v.x, 0.0 );\n"
 		  "\tfloat s = ( v.x > 0.0 ) ? pow( max( v.y, 0.0 ), clamp( v.w, -128.0, 128.0 ) ) : 0.0;\n"
 		  "\treturn float4( 1.0, d, s, 1.0 );\n}\n";
+	if ( key.shadow ) {
+		msl += kShadowMSL;
+	}
 	msl += "struct U { float4 v[" + Num( out.uniforms.empty() ? 1 : (int)out.uniforms.size() ) + "]; };\n";
 	msl += vs;
 	msl += fs;

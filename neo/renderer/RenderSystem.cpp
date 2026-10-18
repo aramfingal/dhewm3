@@ -596,6 +596,8 @@ void idRenderSystemLocal::BeginFrame( int windowWidth, int windowHeight ) {
 	// determine which back end we will use
 	SetBackEndRenderer();
 
+	R_ShadowMapsFrame();
+
 	guiModel->Clear();
 
 	// for the larger-than-window tiled rendering screenshots

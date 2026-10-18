@@ -124,3 +124,18 @@ Each item: where, approach, risk, how to verify.
     velocity means the AI's movement code). Reproduce by setting a monster's velocity to NaN
     from a temporary console command. Other loops over a NaN value could hang under
     `-ffinite-math-only`; not audited.
+
+## Shadow maps (`r_shadowMaps`, DESIGN.md "Shadow maps")
+
+25. **Maps are drawn every frame.** Most Doom 3 lights and casters do not move: a map could
+    be kept while its light and the entities in it are unchanged. That is the large
+    remaining gain; an open view outdoors in mc_underground draws 1,880 fps with stencil
+    shadows and 1,185 with shadow maps (six layers for its point light).
+26. **A light whose volume reaches behind its origin keeps stencil shadows** (two projected
+    lights in hell1). A wider projection, or six layers, would cover them.
+27. **Filtering is a fixed 3x3 of bilinear comparisons**; no softer shadows further from the
+    caster, and one map for big outdoor lights (no cascades): their shadows get blocky far
+    from the light, where a map texel covers a lot.
+28. **Not checked by playing**: every comparison is the harness and scripted views. Look for
+    light leaking through thin walls, shadows on moving monsters and doors, and the view
+    weapon.

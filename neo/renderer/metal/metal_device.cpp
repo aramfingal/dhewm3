@@ -67,6 +67,8 @@ static bool                        s_frameCleared = false;	// the scene pass has
 static bool                        s_endMsaaAtNextCopy = false;
 static bool                        s_msaaEnded = false;
 static const uint32_t              PIPELINE_SINGLE_SAMPLE = 1u << 24;	// in a pipeline key's blendKey
+static const uint32_t              PIPELINE_SHADOW_TARGET = 1u << 25;	// in a pipeline key's blendKey: a shadow map
+static const MTL::PixelFormat      s_shadowPixelFormat = MTL::PixelFormatDepth32Float;
 static bool                        s_frameHasWork = false;	// the frame command buffer has encoded work
 static bool                        s_firstFrame = true;
 static uint64_t                    s_frameSerial = 0;
@@ -129,6 +131,27 @@ static struct {
 	MTL::DepthStencilState *depthStencil;
 	uint32_t stencilRef;
 } s_want;
+
+// Shadow maps (r_shadowMaps, renderer/draw_shadowmap.cpp). The shadow casters of a light are
+// drawn into a depth texture array (one layer, or six for a point light) in a command buffer
+// of their own, committed before the frame's: the scene pass, multisampled or not, goes on
+// undisturbed. While a layer is drawn it is the current encoder (GLMetal_ShadowMapBeginLayer),
+// so the GL layer draws into it as into the scene.
+struct MetalShadowMap {
+	MTL::Texture *tex;
+	int size, layers;
+	uint64_t usedFrame;		// s_frameSerial + 1 of the frame that uses it, 0 = never
+};
+static std::vector<MetalShadowMap> s_shadowMaps;
+static MTL::CommandBuffer *s_shadowCmdBuffer = nullptr;
+static MTL::SamplerState *s_shadowSampler = nullptr;
+static bool s_shadowTarget = false;		// a shadow map layer is the current encoder
+static struct {
+	MTL::RenderCommandEncoder *encoder;
+	MetalEncoderStateCache encState;
+	decltype( s_want ) want;
+	int width, height;
+} s_shadowSaved;
 
 // ---------------------------------------------------------------------------
 // Caches
@@ -599,6 +622,164 @@ static void GLMetal_TrackGPUTime( MTL::CommandBuffer *cmd ) {
 	} );
 }
 
+// ============================================================================
+// Shadow maps (see s_shadowMaps)
+// ============================================================================
+
+// Shadow maps drawn so far must be on the GPU's queue before anything that samples them.
+static void GLMetal_CommitShadowWork( void ) {
+	if ( s_shadowTarget ) {
+		GLMetal_ShadowMapEndLayer();
+	}
+	if ( s_shadowCmdBuffer ) {
+		GLMetal_TrackGPUTime( s_shadowCmdBuffer );
+		s_shadowCmdBuffer->commit();
+		s_shadowCmdBuffer->release();
+		s_shadowCmdBuffer = nullptr;
+	}
+}
+
+// A shadow map of `size` x `size` and `layers` layers no other light of this frame uses, or -1.
+// Maps are kept from frame to frame; reusing one the frame before still samples is ordered by
+// Metal's hazard tracking, both being on the one queue.
+int GLMetal_ShadowMapAcquire( int size, int layers ) {
+	if ( !s_device || size <= 0 || ( layers != 1 && layers != 6 ) ) {
+		return -1;
+	}
+	if ( !s_frameBegun ) {
+		GLMetal_BeginFrame();
+	}
+	for ( size_t i = 0; i < s_shadowMaps.size(); i++ ) {
+		MetalShadowMap &m = s_shadowMaps[i];
+		if ( m.size == size && m.layers == layers && m.usedFrame != s_frameSerial + 1 ) {
+			m.usedFrame = s_frameSerial + 1;
+			return (int)i;
+		}
+	}
+	if ( s_shadowMaps.size() >= 128 ) {
+		return -1;
+	}
+	MTL::TextureDescriptor *desc = MTL::TextureDescriptor::alloc()->init();
+	desc->setTextureType( MTL::TextureType2DArray );
+	desc->setPixelFormat( s_shadowPixelFormat );
+	desc->setWidth( (NS::UInteger)size );
+	desc->setHeight( (NS::UInteger)size );
+	desc->setArrayLength( (NS::UInteger)layers );
+	desc->setUsage( MTL::TextureUsageRenderTarget | MTL::TextureUsageShaderRead );
+	desc->setStorageMode( MTL::StorageModePrivate );
+	MTL::Texture *tex = s_device->newTexture( desc );
+	desc->release();
+	if ( !tex ) {
+		MetalHost_Warning( "[Metal] could not create a %dx%d shadow map", size, size );
+		return -1;
+	}
+	MetalShadowMap m = { tex, size, layers, s_frameSerial + 1 };
+	s_shadowMaps.push_back( m );
+	return (int)s_shadowMaps.size() - 1;
+}
+
+MTL::Texture *GLMetal_ShadowMapTexture( int map ) {
+	return ( map >= 0 && map < (int)s_shadowMaps.size() ) ? s_shadowMaps[map].tex : nullptr;
+}
+
+// Linear filtering of comparisons: each lookup is a 2x2 percentage-closer filter.
+MTL::SamplerState *GLMetal_ShadowSampler( void ) {
+	if ( !s_shadowSampler && s_device ) {
+		MTL::SamplerDescriptor *desc = MTL::SamplerDescriptor::alloc()->init();
+		desc->setMinFilter( MTL::SamplerMinMagFilterLinear );
+		desc->setMagFilter( MTL::SamplerMinMagFilterLinear );
+		desc->setMipFilter( MTL::SamplerMipFilterNotMipmapped );
+		desc->setSAddressMode( MTL::SamplerAddressModeClampToEdge );
+		desc->setTAddressMode( MTL::SamplerAddressModeClampToEdge );
+		desc->setCompareFunction( MTL::CompareFunctionLessEqual );
+		s_shadowSampler = s_device->newSamplerState( desc );
+		desc->release();
+	}
+	return s_shadowSampler;
+}
+
+// Makes layer `layer` of shadow map `map` the current encoder, cleared to depth 1, until
+// GLMetal_ShadowMapEndLayer. The scene's encoder and its state are put aside meanwhile.
+void GLMetal_ShadowMapBeginLayer( int map, int layer ) {
+	if ( s_shadowTarget ) {
+		GLMetal_ShadowMapEndLayer();
+	}
+	if ( map < 0 || map >= (int)s_shadowMaps.size() || layer < 0 || layer >= s_shadowMaps[map].layers || !s_queue ) {
+		return;
+	}
+	if ( !s_frameBegun ) {
+		GLMetal_BeginFrame();
+	}
+	if ( !s_shadowCmdBuffer ) {
+		s_shadowCmdBuffer = s_queue->commandBuffer();
+		if ( !s_shadowCmdBuffer ) {
+			return;
+		}
+		s_shadowCmdBuffer->retain();
+	}
+	const MetalShadowMap &m = s_shadowMaps[map];
+	MTL::RenderPassDescriptor *desc = MTL::RenderPassDescriptor::renderPassDescriptor();
+	MTL::RenderPassDepthAttachmentDescriptor *depth = desc->depthAttachment();
+	depth->setTexture( m.tex );
+	depth->setSlice( (NS::UInteger)layer );
+	depth->setLoadAction( MTL::LoadActionClear );
+	depth->setClearDepth( 1.0 );
+	depth->setStoreAction( MTL::StoreActionStore );
+	MTL::RenderCommandEncoder *enc = s_shadowCmdBuffer->renderCommandEncoder( desc );
+	if ( !enc ) {
+		return;
+	}
+	enc->retain();
+	s_shadowSaved.encoder = s_encoder;
+	s_shadowSaved.encState = s_encState;
+	s_shadowSaved.want = s_want;
+	s_shadowSaved.width = s_width;
+	s_shadowSaved.height = s_height;
+	s_encoder = enc;
+	s_width = s_height = m.size;
+	s_shadowTarget = true;
+	// the scene's viewport and scissor may be larger than the map
+	s_want.viewport.originX = s_want.viewport.originY = 0.0;
+	s_want.viewport.width = s_want.viewport.height = (double)m.size;
+	s_want.viewport.znear = 0.0;
+	s_want.viewport.zfar = 1.0;
+	s_want.scissor.x = s_want.scissor.y = 0;
+	s_want.scissor.width = s_want.scissor.height = (NS::UInteger)m.size;
+	GLMetal_OnEncoderOpened();
+}
+
+void GLMetal_ShadowMapEndLayer( void ) {
+	if ( !s_shadowTarget ) {
+		return;
+	}
+	s_encoder->endEncoding();
+	s_encoder->release();
+	s_encoder = s_shadowSaved.encoder;
+	s_encState = s_shadowSaved.encState;
+	s_want = s_shadowSaved.want;
+	s_width = s_shadowSaved.width;
+	s_height = s_shadowSaved.height;
+	s_shadowTarget = false;
+	// what the GL layer set was set on the shadow map's encoder
+	s_encoderGeneration++;
+}
+
+bool GLMetal_ShadowMapLayerActive( void ) { return s_shadowTarget; }
+
+static void GLMetal_ReleaseShadowMaps( void ) {
+	GLMetal_CommitShadowWork();
+	for ( MetalShadowMap &m : s_shadowMaps ) {
+		if ( m.tex ) {
+			m.tex->release();
+		}
+	}
+	s_shadowMaps.clear();
+	if ( s_shadowSampler ) {
+		s_shadowSampler->release();
+		s_shadowSampler = nullptr;
+	}
+}
+
 // Time spent compiling shaders and creating pipelines in the current frame (r_metalDebug 1
 // prints it), to find the hitches of first use.
 static double s_frameCompileSeconds = 0.0, s_framePipelineSeconds = 0.0;
@@ -697,7 +878,8 @@ static void ConfigureBlendState( MTL::RenderPipelineColorAttachmentDescriptor *c
 
 // PIPELINE_DEPTH_ONLY: the variant for the single-sample depth replay pass (no colour target).
 // PIPELINE_LAYER: the variant for a blend layer target (see GLMetal_BeginBlendLayer).
-enum { PIPELINE_SCENE, PIPELINE_DEPTH_ONLY, PIPELINE_LAYER };
+// PIPELINE_SHADOW: the variant for a shadow map (depth only, no fragment function).
+enum { PIPELINE_SCENE, PIPELINE_DEPTH_ONLY, PIPELINE_LAYER, PIPELINE_SHADOW };
 static MTL::RenderPipelineState *GLMetal_CreatePipeline( int programId, const MetalVertexLayout &layout, uint32_t blendKey, int mode ) {
 	const MetalProgramRecord &rec = s_programs[programId];
 	MTL::VertexDescriptor *vertexDesc = MTL::VertexDescriptor::alloc()->init();
@@ -723,14 +905,16 @@ static MTL::RenderPipelineState *GLMetal_CreatePipeline( int programId, const Me
 
 	MTL::RenderPipelineDescriptor *pipelineDesc = MTL::RenderPipelineDescriptor::alloc()->init();
 	pipelineDesc->setVertexFunction( rec.vert );
-	pipelineDesc->setFragmentFunction( rec.frag );
+	pipelineDesc->setFragmentFunction( mode == PIPELINE_SHADOW ? nullptr : rec.frag );
 	pipelineDesc->setVertexDescriptor( vertexDesc );
 	pipelineDesc->setLabel( NS::String::string( rec.name.c_str(), NS::UTF8StringEncoding ) );
-	if ( mode != PIPELINE_LAYER ) {
+	if ( mode == PIPELINE_SHADOW ) {
+		pipelineDesc->setDepthAttachmentPixelFormat( s_shadowPixelFormat );
+	} else if ( mode != PIPELINE_LAYER ) {
 		pipelineDesc->setDepthAttachmentPixelFormat( s_depthPixelFormat );
 		pipelineDesc->setStencilAttachmentPixelFormat( s_depthPixelFormat );
 	}
-	if ( mode == PIPELINE_DEPTH_ONLY ) {
+	if ( mode == PIPELINE_DEPTH_ONLY || mode == PIPELINE_SHADOW ) {
 		pipelineDesc->setRasterSampleCount( 1 );
 	} else if ( mode == PIPELINE_LAYER ) {
 		// rgb collects colour as the blend says; alpha collects how much of the background is left
@@ -762,7 +946,7 @@ static MTL::RenderPipelineState *GLMetal_CreatePipeline( int programId, const Me
 	vertexDesc->release();
 	if ( !pipeline ) {
 		MetalHost_Warning( "[Metal] pipeline creation failed (%s, blend 0x%x%s): %s", rec.name.c_str(), blendKey,
-						   mode == PIPELINE_DEPTH_ONLY ? ", depth only" : mode == PIPELINE_LAYER ? ", layer" : "", MetalErrorString( error ) );
+						   mode == PIPELINE_DEPTH_ONLY ? ", depth only" : mode == PIPELINE_LAYER ? ", layer" : mode == PIPELINE_SHADOW ? ", shadow map" : "", MetalErrorString( error ) );
 	}
 	return pipeline;
 }
@@ -773,11 +957,14 @@ MTL::RenderPipelineState *GLMetal_GetPipeline( int programId, const MetalVertexL
 	if ( programId < 0 || programId >= (int)s_programs.size() ) {
 		return nullptr;
 	}
-	if ( s_msaaEnded ) {
+	if ( s_shadowTarget ) {
+		// no colour target: the blend state does not matter
+		blendKey = PIPELINE_SHADOW_TARGET;
+	} else if ( s_msaaEnded ) {
 		blendKey |= PIPELINE_SINGLE_SAMPLE;
 	}
 	PipelineCacheKey key = { programId, blendKey, layoutHash };
-	if ( !( key == s_curPipelineKey ) ) {
+	if ( !s_shadowTarget && !( key == s_curPipelineKey ) ) {
 		// what a variant of the pipeline about to be bound is made from
 		s_curPipelineKey = key;
 		s_curPipelineLayout = layout;
@@ -794,7 +981,8 @@ MTL::RenderPipelineState *GLMetal_GetPipeline( int programId, const MetalVertexL
 		return it->second;
 	}
 
-	MTL::RenderPipelineState *pipeline = GLMetal_CreatePipeline( programId, layout, blendKey, PIPELINE_SCENE );
+	MTL::RenderPipelineState *pipeline = GLMetal_CreatePipeline( programId, layout, blendKey,
+																 ( blendKey & PIPELINE_SHADOW_TARGET ) ? PIPELINE_SHADOW : PIPELINE_SCENE );
 	s_pipelineCache.emplace( key, pipeline );
 	if ( pipeline ) {
 		s_lastPipelineKey = key;
@@ -902,7 +1090,7 @@ static bool GLMetal_CaptureDraw( MetalDepthDraw &d, bool indexed, MTL::Primitive
 
 static void GLMetal_RecordDepthDraw( bool indexed, MTL::PrimitiveType primitive, MTL::IndexType indexType,
 									 MTL::Buffer *indexBuffer, NS::UInteger first, NS::UInteger count ) {
-	if ( !s_depthRecordValid || !s_depthCurWrite || !s_encState.pipeline ) {
+	if ( !s_depthRecordValid || !s_depthCurWrite || !s_encState.pipeline || s_shadowTarget ) {
 		return;
 	}
 	MetalDepthDraw d;
@@ -1315,7 +1503,7 @@ void GLMetal_DrawIndexed( NS::UInteger count, MTL::IndexType indexType, MTL::Buf
 	if ( !s_encoder ) {
 		return;
 	}
-	if ( s_layerActive && GLMetal_RecordLayerDraw( true, MTL::PrimitiveTypeTriangle, indexType, indexBuffer, indexOffset, count ) ) {
+	if ( s_layerActive && !s_shadowTarget && GLMetal_RecordLayerDraw( true, MTL::PrimitiveTypeTriangle, indexType, indexBuffer, indexOffset, count ) ) {
 		return;
 	}
 	s_encoder->drawIndexedPrimitives( MTL::PrimitiveTypeTriangle, count, indexType, indexBuffer, indexOffset );
@@ -1326,7 +1514,7 @@ void GLMetal_Draw( MTL::PrimitiveType primitive, NS::UInteger first, NS::UIntege
 	if ( !s_encoder ) {
 		return;
 	}
-	if ( s_layerActive && GLMetal_RecordLayerDraw( false, primitive, MTL::IndexTypeUInt16, nullptr, first, count ) ) {
+	if ( s_layerActive && !s_shadowTarget && GLMetal_RecordLayerDraw( false, primitive, MTL::IndexTypeUInt16, nullptr, first, count ) ) {
 		return;
 	}
 	s_encoder->drawPrimitives( primitive, first, count );
@@ -1691,6 +1879,7 @@ void GLMetal_FlushAndWait( void ) {
 	// the recorded depth draws use buffers and textures this command buffer kept alive
 	s_depthRecordValid = false;
 	s_depthDraws.clear();
+	GLMetal_CommitShadowWork();
 	GLMetal_TrackGPUTime( s_cmdBuffer );
 	s_cmdBuffer->commit();
 	s_cmdBuffer->waitUntilCompleted();
@@ -1854,6 +2043,9 @@ static bool GLMetal_EnsureEncoder( void ) {
 }
 
 MTL::RenderCommandEncoder *GLMetal_CurrentRenderEncoder( void ) {
+	if ( s_shadowTarget ) {
+		return s_encoder;
+	}
 	if ( !GLMetal_EnsureEncoder() ) {
 		return nullptr;
 	}
@@ -2197,6 +2389,7 @@ void GLMetal_Present( void ) {
 		MTL::CommandBuffer *copyBuffer = s_queue->commandBuffer();
 		if ( copyBuffer ) {
 			GLMetal_FlushUploads( false );
+			GLMetal_CommitShadowWork();
 			GLMetal_TrackGPUTime( s_cmdBuffer );
 			s_cmdBuffer->commit();
 			s_cmdBuffer->release();
@@ -2248,6 +2441,7 @@ void GLMetal_Present( void ) {
 	if ( s_drawable ) {
 		cmdBuffer->presentDrawable( s_drawable );
 	}
+	GLMetal_CommitShadowWork();
 	GLMetal_TrackGPUTime( cmdBuffer );
 	cmdBuffer->commit();
 
@@ -2270,6 +2464,7 @@ void GLMetal_Present( void ) {
 }
 
 void GLMetal_Shutdown( void ) {
+	GLMetal_CommitShadowWork();
 	GLMetal_EndEncoderIfNeeded();
 	if ( s_cmdBuffer ) {
 		GLMetal_ReleaseInFlightFrameSlot();
@@ -2303,6 +2498,7 @@ void GLMetal_Shutdown( void ) {
 		}
 	}
 	s_pipelineCache.clear();
+	GLMetal_ReleaseShadowMaps();
 	for ( auto &kv : s_depthPipelineCache ) {
 		if ( kv.second ) {
 			kv.second->release();

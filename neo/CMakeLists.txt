@@ -651,6 +651,7 @@ set(src_renderer
 	renderer/VertexCache.cpp
 	renderer/draw_arb2.cpp
 	renderer/draw_common.cpp
+	renderer/draw_shadowmap.cpp
 	renderer/tr_backend.cpp
 	renderer/tr_deform.cpp
 	renderer/tr_font.cpp

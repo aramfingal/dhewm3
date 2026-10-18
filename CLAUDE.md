@@ -129,6 +129,10 @@ compiles"). Deleting it is safe.
 main view's `_currentRender` copy (heat haze, glass distortion, 2D) is drawn without it. See
 DESIGN.md.
 
+`r_shadowMaps` (default 0, archived; Metal only): shadow maps instead of stencil shadow volumes
+(`renderer/draw_shadowmap.cpp`, DESIGN.md "Shadow maps"); `r_shadowMapSize`, `r_shadowMapSoftness`,
+`r_shadowMapDebug`. The harness leaves it off; pass `--set r_shadowMaps 1` to test it.
+
 `r_metalParticleLayer` (default 2, archived) draws soft particles into a half-size layer on
 Metal only, so Metal and OpenGL images differ where there is steam or smoke. The harness sets
 it to 0; pass `--set r_metalParticleLayer 2` to test the layer. See DESIGN.md.

@@ -205,6 +205,26 @@ The cost is shadow-volume stencil fill times the sample count; particles (477 wi
 being outside the map (the view is in area 38) are not it. Ideas if it matters: shadow
 volumes are not clipped with a depth bounds test (`GL_EXT_depth_bounds_test`, FOLLOWUPS 8).
 
+## Shadow maps (Metal, `r_shadowMaps`, branch `shadow-maps`)
+
+Off by default. With `r_shadowMaps 1` a light's shadow casters (the caps of the shadow volumes
+the front end makes) are drawn into depth maps seen from the light, in a command buffer
+committed before the frame's, and the interactions sample them (3x3 filtered comparisons).
+DESIGN.md "Shadow maps".
+
+Verified:
+- Harness, shadow maps off: PASS, unchanged (largest difference 0.002% of pixels).
+- Harness with `--set r_shadowMaps 1`, compared with OpenGL's stencil shadows: 68 shots, on
+  average 0.1% of pixels differ, soft edges. Above 1%: the view weapon, which gets the shadow
+  at its own position (alphalabs1 view5 4.8%, demo frame 300 1.5%).
+- mc_underground at (-908 -1328 -103) yaw 327, 2560x1440, 8x, HD pack, uncapped: 470 fps
+  with stencil shadows, 1,250-1,300 with shadow maps. The open view at (-656 -2112 96) yaw 0:
+  1,740-1,910 against 1,065 (one point light, six maps, every frame: FOLLOWUPS 25).
+
+Found on the way: dmap's precomputed shadow volumes of the world cannot be used (no caps of
+the world's surfaces), and surfaces facing away from the light must be dark whatever their
+normal map says (stencil volumes use them as caps).
+
 ## Next
 
 - FOLLOWUPS.md: a visible-window test, a harness scenario for subviews and post-process

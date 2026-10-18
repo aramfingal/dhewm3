@@ -910,10 +910,15 @@ void idInteraction::CreateInteraction( const idRenderModel *model ) {
 		if ( HasShadows() && shader->SurfaceCastsShadow() && tri->silEdges != NULL ) {
 
 			// if the light has an optimized shadow volume, don't create shadows for any models that are part of the base areas
-			if ( lightDef->parms.prelightModel == NULL || !model->IsStaticWorldModel() || !r_useOptimizedShadows.GetBool() ) {
+			if ( lightDef->parms.prelightModel == NULL || !model->IsStaticWorldModel() || !R_UseOptimizedShadows() ) {
 
 				// this is the only place during gameplay (outside the utilities) that R_CreateShadowVolume() is called
 				sint->shadowTris = R_CreateShadowVolume( entityDef, tri, lightDef, shadowGen, sint->cullInfo );
+				if ( sint->shadowTris && sint->shadowTris->bounds.IsCleared() && !R_UseOptimizedShadows() ) {
+					// shadow maps cull casters by these (draw_shadowmap.cpp); the volume's far end
+					// is at infinity, so the caster's bounds are the ones that matter
+					sint->shadowTris->bounds = tri->bounds;
+				}
 				if ( sint->shadowTris ) {
 					if ( shader->Coverage() != MC_OPAQUE || ( !r_skipSuppress.GetBool() && entityDef->parms.suppressSurfaceInViewID ) ) {
 						// if any surface is a shadow-casting perforated or translucent surface, or the

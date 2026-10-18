@@ -1020,7 +1020,7 @@ void R_AddLightSurfaces( void ) {
 		}
 
 		// add the prelight shadows for the static world geometry
-		if ( light->parms.prelightModel && r_useOptimizedShadows.GetBool() ) {
+		if ( light->parms.prelightModel && R_UseOptimizedShadows() ) {
 
 			if ( !light->parms.prelightModel->NumSurfaces() ) {
 				common->Error( "no surfs in prelight model '%s'", light->parms.prelightModel->Name() );

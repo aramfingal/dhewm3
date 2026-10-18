@@ -184,6 +184,9 @@ int currentPair = -1;
 bool rasterDirty = true;
 
 int debugSkipPair = -1;				// r_metalSkipPair, read once per frame
+// r_shadowMaps: the shadow map interactions are multiplied by (MGL_ShadowSample), -1 = none
+int shadowSampleMap = -1;
+float shadowSlots[MGL_SHADOW_SLOTS][4];
 MglTexture *fallbackTexture[4];		// by MT_*
 int clearProgram = -1;
 
@@ -728,6 +731,7 @@ void BuildPairKey( MglPairKey &key ) {
 	if ( gl.alphaTest ) {
 		key.alphaFunc = (uint8_t)( MA_NEVER + ( gl.alphaFunc - GL_NEVER ) );
 	}
+	key.shadow = ( shadowSampleMap >= 0 ) ? 1 : 0;
 	uint32_t reads = key.fp ? key.fp->varyings : 0;
 	for ( int i = 0; i < 8; i++ ) {
 		const TexUnit &u = gl.unit[i];
@@ -1108,6 +1112,9 @@ void FillUniform( const MglUniform &u, float *out ) {
 	case MU_ENV_COLOR:
 		memcpy( out, gl.unit[u.a & 15].envColor, 4 * sizeof( float ) );
 		break;
+	case MU_SHADOW:
+		memcpy( out, shadowSlots[u.b % MGL_SHADOW_SLOTS], 4 * sizeof( float ) );
+		break;
 	case MU_TEX_SIZE: {
 		const MglTexture *t = TextureByName( gl.unit[u.a & 15].bound[MT_2D] );
 		out[0] = ( t && t->width ) ? 1.0f / t->width : 1.0f;
@@ -1367,6 +1374,10 @@ void BindTextures( const MglPair &pair ) {
 			t->sampler = GLMetal_GetSampler( SamplerKeyFor( t ) );
 		}
 		GLMetal_SetFragmentTexture( t->tex, t->sampler, (NS::UInteger)i );
+	}
+	if ( pair.shadow ) {
+		MTL::Texture *map = GLMetal_ShadowMapTexture( shadowSampleMap );
+		GLMetal_SetFragmentTexture( map ? map : fallbackTexture[MT_2D]->tex, GLMetal_ShadowSampler(), MGL_SHADOW_TEXTURE_UNIT );
 	}
 }
 
@@ -2783,6 +2794,65 @@ extern "C" void MGL_EndParticleLayer( void ) {
 
 extern "C" void MGL_EndMultisamplingAtNextCopy( void ) {
 	GLMetal_EndMultisamplingAtNextCopy();
+}
+
+// Shadow maps (r_shadowMaps, renderer/draw_shadowmap.cpp)
+extern "C" int MGL_ShadowMapAcquire( int size, int layers ) {
+	return initialized ? GLMetal_ShadowMapAcquire( size, layers ) : -1;
+}
+
+// Draws until MGL_ShadowMapEndLayer go into layer `layer` of the map, depth only.
+// The viewport and scissor are the whole map while a layer is drawn, and the caller's after:
+// the back end's GL state is not touched.
+static int shadowSavedViewport[4], shadowSavedScissor[4];
+static bool shadowSavedScissorTest, shadowLayerOpen = false;
+
+extern "C" void MGL_ShadowMapBeginLayer( int map, int layer ) {
+	if ( !initialized ) {
+		return;
+	}
+	GLMetal_ShadowMapBeginLayer( map, layer );
+	if ( !GLMetal_ShadowMapLayerActive() ) {
+		return;
+	}
+	if ( !shadowLayerOpen ) {
+		memcpy( shadowSavedViewport, gl.viewport, sizeof( shadowSavedViewport ) );
+		memcpy( shadowSavedScissor, gl.scissor, sizeof( shadowSavedScissor ) );
+		shadowSavedScissorTest = gl.scissorTest;
+		shadowLayerOpen = true;
+	}
+	int size;
+	GLMetal_GetSceneSize( &size, NULL );
+	gl.viewport[0] = gl.viewport[1] = 0;
+	gl.viewport[2] = gl.viewport[3] = size;
+	gl.scissorTest = false;
+	rasterDirty = true;
+}
+
+extern "C" void MGL_ShadowMapEndLayer( void ) {
+	if ( !initialized ) {
+		return;
+	}
+	GLMetal_ShadowMapEndLayer();
+	if ( shadowLayerOpen ) {
+		memcpy( gl.viewport, shadowSavedViewport, sizeof( shadowSavedViewport ) );
+		memcpy( gl.scissor, shadowSavedScissor, sizeof( shadowSavedScissor ) );
+		gl.scissorTest = shadowSavedScissorTest;
+		shadowLayerOpen = false;
+	}
+	rasterDirty = true;
+}
+
+// Draws until the next call multiply their colour by how much of the light shadow map `map`
+// lets through; `slots` are the MGL_SHADOW_SLOTS parameters. map -1 ends it.
+extern "C" void MGL_ShadowSample( int map, const float *slots ) {
+	if ( ( map >= 0 ) != ( shadowSampleMap >= 0 ) ) {
+		shaderDirty = true;
+	}
+	shadowSampleMap = map;
+	if ( map >= 0 && slots ) {
+		memcpy( shadowSlots, slots, sizeof( shadowSlots ) );
+	}
 }
 
 extern "C" void MGL_SwapBuffers( void ) {

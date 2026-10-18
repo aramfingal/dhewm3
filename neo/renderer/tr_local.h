@@ -1128,6 +1128,12 @@ void		GLimp_SwapBuffers( void );
 float		GLimp_BeginParticleLayer( void );
 void		GLimp_EndParticleLayer( void );
 void		GLimp_EndMultisamplingAtNextCopy( void );
+// shadow maps, Metal backend only (r_shadowMaps, draw_shadowmap.cpp)
+bool		GLimp_HasShadowMaps( void );
+int			GLimp_ShadowMapAcquire( int size, int layers );
+void		GLimp_ShadowMapBeginLayer( int map, int layer );
+void		GLimp_ShadowMapEndLayer( void );
+void		GLimp_ShadowSample( int map, const float *slots );
 // Calls the system specific swapbuffers routine, and may also perform
 // other system specific cvar checks that happen every frame.
 // This will not be called if 'r_drawBuffer GL_FRONT'
@@ -1331,6 +1337,14 @@ void RB_BindVariableStageImage( const textureStage_t *texture, const float *shad
 void RB_BindStageTexture( const float *shaderRegisters, const textureStage_t *texture, const drawSurf_t *surf );
 void RB_FinishStageTexture( const textureStage_t *texture, const drawSurf_t *surf );
 void RB_StencilShadowPass( const drawSurf_t *drawSurfs );
+
+// draw_shadowmap.cpp (r_shadowMaps, Metal backend only)
+bool RB_ShadowMapsActive( void );
+// the dmap generated shadow volumes of the world (r_useOptimizedShadows) are not used with
+// shadow maps: their caps are not the world's surfaces
+bool R_UseOptimizedShadows( void );
+void R_ShadowMapsFrame( void );
+bool RB_ShadowMapDrawInteractions( void ( *drawInteractions )( const drawSurf_t *surf ) );
 void RB_STD_DrawView( void );
 void RB_STD_FogAllLights( void );
 void RB_BakeTextureMatrixIntoTexgen( idPlane lightProject[3], const float textureMatrix[16] );

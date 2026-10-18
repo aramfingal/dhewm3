@@ -21,7 +21,19 @@ enum MglUniformKind {
 	MU_ALPHA_REF,		// x = alpha test reference
 	MU_ENV_COLOR,		// a = unit: GL_TEXTURE_ENV_COLOR
 	MU_TEX_SIZE,		// a = unit: 1/width, 1/height of the bound rectangle texture
+	MU_SHADOW,			// b = slot of the shadow map parameters (MGL_SHADOW_*, r_shadowMaps)
 };
+
+// Shadow map parameters, MU_SHADOW slots (see MglShader_Generate and draw_shadowmap.cpp):
+//   0-2  eye space -> world rows
+//   3    x layers (1 or 6), y filter radius in texels, z 1 / size, w depth bias
+//   4    light origin in world space
+//   5    x 1: a surface facing away from the light is in shadow (not for noselfshadow ones)
+//   6+4n world -> clip rows of layer n (OpenGL clip space)
+enum { MGL_SHADOW_EYE_TO_WORLD = 0, MGL_SHADOW_PARAMS = 3, MGL_SHADOW_ORIGIN = 4, MGL_SHADOW_FLAGS = 5,
+	   MGL_SHADOW_LAYER0 = 6, MGL_SHADOW_SLOTS = 6 + 4 * 6 };
+// the texture and sampler slot of the shadow map in a shadowed pair's fragment function
+enum { MGL_SHADOW_TEXTURE_UNIT = 15 };
 
 enum { MM_MVP, MM_MODELVIEW, MM_PROJECTION, MM_TEXTURE0 };	// MM_TEXTURE0 + unit
 enum { MX_NONE, MX_INVERSE, MX_TRANSPOSE, MX_INVTRANS };
@@ -112,7 +124,8 @@ struct MglPairKey {
 	uint32_t fpId, fpVersion;
 	uint32_t arrayMask;			// attributes that come from enabled arrays
 	uint8_t alphaFunc;			// MA_*
-	uint8_t pad[3];
+	uint8_t shadow;				// 1: multiply the colour by the shadow map (r_shadowMaps)
+	uint8_t pad[2];
 	MglFFUnit unit[8];
 };
 
@@ -122,6 +135,7 @@ struct MglPair {
 	uint32_t attribMask;		// attributes the vertex function reads from arrays
 	uint32_t texMask;			// image units the fragment function samples
 	uint8_t texTarget[16];		// MT_*
+	uint8_t shadow;				// MglPairKey::shadow
 	std::string name;
 };
 

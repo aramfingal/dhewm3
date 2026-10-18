@@ -272,8 +272,14 @@ void RB_ARB2_DrawInteractions( void ) {
 			continue;
 		}
 
-		// clear the stencil buffer if needed
-		if ( vLight->globalShadows || vLight->localShadows ) {
+		// shadow maps (r_shadowMaps, draw_shadowmap.cpp) instead of stencil shadows
+		const bool shadowMapped = ( vLight->globalShadows || vLight->localShadows ) && RB_ShadowMapsActive()
+			&& RB_ShadowMapDrawInteractions( RB_ARB2_CreateDrawInteractions );
+
+			// clear the stencil buffer if needed
+		if ( shadowMapped ) {
+			// the opaque interactions are drawn
+		} else if ( vLight->globalShadows || vLight->localShadows ) {
 			backEnd.currentScissor = vLight->scissorRect;
 			if ( r_useScissor.GetBool() ) {
 				qglScissor( backEnd.viewDef->viewport.x1 + backEnd.currentScissor.x1,
@@ -289,7 +295,9 @@ void RB_ARB2_DrawInteractions( void ) {
 			qglStencilFunc( GL_ALWAYS, 128, 255 );
 		}
 
-		if ( r_useShadowVertexProgram.GetBool() ) {
+		if ( shadowMapped ) {
+			// see above
+		} else if ( r_useShadowVertexProgram.GetBool() ) {
 			qglEnable( GL_VERTEX_PROGRAM_ARB );
 			qglBindProgramARB( GL_VERTEX_PROGRAM_ARB, VPROG_STENCIL_SHADOW );
 			RB_StencilShadowPass( vLight->globalShadows );
