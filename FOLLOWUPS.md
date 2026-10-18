@@ -139,3 +139,8 @@ Each item: where, approach, risk, how to verify.
 28. **Not checked by playing**: every comparison is the harness and scripted views. Look for
     light leaking through thin walls, shadows on moving monsters and doors, and the view
     weapon.
+29. **Light bleeds where two building walls meet at 90 degrees** (reported 2026-10-18 while
+    playing with `r_shadowMaps 1`, no screenshot or position yet). Likely candidates: the map
+    holds the casters' back faces, so at an outside corner the lit wall's own edge is not in
+    it; or the view-facing flip of the derivative normal at the corner pixels. Get a
+    position (`getviewpos`) and compare `r_shadowMapDebug 2`.
