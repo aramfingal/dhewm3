@@ -196,6 +196,15 @@ The hidden test window is shown at 120 Hz whatever the frame costs, so the effec
 is not verified (FOLLOWUPS 5).
 Info.plist now has `LSApplicationCategoryType` (games), so macOS can use Game Mode.
 
+## Stencil shadows with multisampling (measured, nothing changed)
+
+mc_underground outdoors at (-908 -1328 -103) yaw 327, next to a structure whose shadow
+covers half the screen, 2560x1440, HD pack, uncapped, hidden: Metal 8x 469 fps (`r_shadows 0`:
+2,159), 4x 878, 2x 1,598, no multisampling 1,601 (`r_shadows 0`: 1,747). OpenGL 8x: 134 fps.
+The cost is shadow-volume stencil fill times the sample count; particles (477 without) and
+being outside the map (the view is in area 38) are not it. Ideas if it matters: shadow
+volumes are not clipped with a depth bounds test (`GL_EXT_depth_bounds_test`, FOLLOWUPS 8).
+
 ## Next
 
 - FOLLOWUPS.md: a visible-window test, a harness scenario for subviews and post-process
