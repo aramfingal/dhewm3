@@ -2189,7 +2189,23 @@ void GLMetal_Present( void ) {
 	}
 	GLMetal_EndEncoderIfNeeded( true );
 
-	if ( GLMetal_ShouldPresent() && s_presentPipeline ) {
+	const bool present = GLMetal_ShouldPresent() && s_presentPipeline;
+	// With vsync, nextDrawable waits for the display. The frame is committed before that wait
+	// so the GPU works on it meanwhile (and does not idle into a lower clock); a second
+	// command buffer copies it to the drawable. Commit order on the queue keeps them in order.
+	if ( present && MetalHost_CvarInt( "r_metalEarlyCommit" ) ) {
+		MTL::CommandBuffer *copyBuffer = s_queue->commandBuffer();
+		if ( copyBuffer ) {
+			GLMetal_FlushUploads( false );
+			GLMetal_TrackGPUTime( s_cmdBuffer );
+			s_cmdBuffer->commit();
+			s_cmdBuffer->release();
+			copyBuffer->retain();
+			s_cmdBuffer = copyBuffer;
+		}
+	}
+
+	if ( present ) {
 		const uint64_t waitStart = GLMetal_NowNs();
 		s_drawable = s_layer->nextDrawable();
 		s_lastPresentNs = GLMetal_NowNs();

@@ -122,6 +122,9 @@ useful when other apps load the Mac and frame rates do not). Cvars: `r_metalHidd
 shader pairs earlier runs compiled; they are compiled at start-up (DESIGN.md, "Shader
 compiles"). Deleting it is safe.
 
+`r_metalEarlyCommit` (default 1): commit the frame before waiting for a drawable (DESIGN.md,
+"Presenting").
+
 `r_metalPostProcessSingleSample` (default 1, archived): with multisampling, what is drawn after the
 main view's `_currentRender` copy (heat haze, glass distortion, 2D) is drawn without it. See
 DESIGN.md.

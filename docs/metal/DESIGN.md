@@ -105,6 +105,15 @@ because the next pass loads it. The last pass of a frame only resolves colour an
 samples, depth and stencil. Storing them was more than half the cost of an 8-sample frame at
 2560x1440 (1,026 fps before, 2,217 after, in a view without particles).
 
+## Presenting (`r_metalEarlyCommit`)
+
+A presented frame is two command buffers: the frame, committed as soon as it is encoded, and
+a copy of the scene target into the drawable, committed after `nextDrawable` returns (it blocks
+until the display hands a drawable back). Commit order on the one queue keeps them in order;
+the in-flight semaphore is signalled by the second. With one command buffer committed after
+the wait (`r_metalEarlyCommit 0`), the GPU idled while the CPU waited and macOS lowered its
+clock: with vsync on, GPU time per frame doubled.
+
 ## Heat haze with multisampling (`r_metalPostProcessSingleSample`)
 
 Post-process surfaces (heat haze, glass distortion) read `_currentRender`, a copy of the

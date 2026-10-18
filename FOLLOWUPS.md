@@ -38,6 +38,8 @@ Each item: where, approach, risk, how to verify.
    `r_fullscreen`, resizing (`MGL_Resize` recreates the scene target) and `r_swapInterval 1`.
    With vsync off, `r_metalPresentHz -1` should keep the frame rate above the refresh rate;
    in the hidden-window test every frame still waited about 5 ms in `nextDrawable`.
+   The hidden window is presented at 120 Hz whatever the frame costs, so vsync at 240 Hz
+   (`r_metalEarlyCommit`) and Game Mode (Info.plist category) are only checkable by playing.
 6. **Per-draw CPU cost.** Every draw rebuilds its uniform block and vertex layout
    (`PrepareDraw` in `mgl.cpp`). Ideas: skip the uniform upload when the block is unchanged,
    cache the layout per array state, copy client-memory index arrays only once per surface

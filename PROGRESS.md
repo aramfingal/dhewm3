@@ -178,6 +178,17 @@ After the main view's `_currentRender` copy the frame is finished without multis
 
 Screenshots of the two show no difference apart from animation and the fps counter.
 
+## Vsync at 240 Hz (Metal, `r_metalEarlyCommit`)
+
+Outdoors (commoutside, 2560x1440, 8x, HD pack) Metal draws 1,000-1,850 fps uncapped (OpenGL
+177-327), but with vsync on the frame was committed only after `nextDrawable` returned: the
+GPU idled while the CPU waited for the display, and its time per frame doubled (5.4-6.0 ms
+against 2.6-3.2 with vsync off), more than a 240 Hz refresh (4.17 ms). Now the frame is
+committed before the wait and a second command buffer copies it to the drawable. Presented,
+vsync on, outdoors: GPU 5.4-6.0 ms per frame -> 2.45-2.66 ms. The hidden test window is shown
+at 120 Hz whatever the frame costs, so the effect at 240 Hz is not verified (FOLLOWUPS 5).
+Info.plist now has `LSApplicationCategoryType` (games), so macOS can use Game Mode.
+
 ## Next
 
 - FOLLOWUPS.md: a visible-window test, a harness scenario for subviews and post-process

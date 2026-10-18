@@ -20,6 +20,8 @@ idCVar r_metalParticleLayer( "r_metalParticleLayer", "2", CVAR_RENDERER | CVAR_A
 	"draw soft particles (steam, smoke) into a separate single-sample layer and blend that over the scene: 0 = no, as OpenGL does, 1 = layer of full resolution, 2 = half, 4 = quarter resolution. Much less to fill where there is a lot of steam" );
 idCVar r_metalPostProcessSingleSample( "r_metalPostProcessSingleSample", "1", CVAR_RENDERER | CVAR_ARCHIVE | CVAR_BOOL,
 	"with multisampling, draw what comes after the main view's _currentRender copy (heat haze, glass distortion, 2D) without multisampling, instead of loading every sample again" );
+idCVar r_metalEarlyCommit( "r_metalEarlyCommit", "1", CVAR_RENDERER | CVAR_BOOL,
+	"when presenting, hand the frame to the GPU before waiting for a drawable and copy it to the drawable in a second command buffer (0: one command buffer, committed after the wait)" );
 idCVar r_metalNoDepthReplay( "r_metalNoDepthReplay", "0", CVAR_RENDERER | CVAR_BOOL,
 	"with multisampling, end the scene pass for a depth copy (soft particles) instead of drawing the depth buffer again; for comparison" );
 idCVar r_metalHidden( "r_metalHidden", "0", CVAR_RENDERER | CVAR_BOOL | CVAR_INIT,
