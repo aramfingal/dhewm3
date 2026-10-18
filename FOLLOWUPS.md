@@ -124,3 +124,27 @@ Each item: where, approach, risk, how to verify.
     velocity means the AI's movement code). Reproduce by setting a monster's velocity to NaN
     from a temporary console command. Other loops over a NaN value could hang under
     `-ffinite-math-only`; not audited.
+
+## Withdrawn shadow-map experiment
+
+25. **Shadow maps are not in the active renderer.** `metal-renderer` was restored to the
+    pre-experiment engine source (`89e386e`) after multi-view measurements confirmed a
+    regression outside the original stencil-fill hotspot (PROGRESS.md). The experiment
+    remains on `shadow-maps` at `16b5030`. Its pooled textures are redrawn every frame
+    (up to six layers per light, sometimes two sets), precomputed world shadows are disabled,
+    and lit fragments perform nine filtered comparisons. Hard filtering and smaller maps
+    do not consistently recover stencil performance. Do not re-enable it without
+    multi-view performance coverage and correct cache invalidation for changing lights,
+    casters and visibility. The experiment also has reported light leaks at right-angle
+    wall corners. The original expensive stencil-shadow view at 8x MSAA is still unresolved.
+
+## Metal API validation
+
+26. **Deferred depth/stencil store actions warn with 8x MSAA.** The full rollback harness
+    (`metal-test-out-shadow-rollback`) reports "Store action for depth [or stencil]
+    attachment must be one of MTLStoreActionMultisampleResolve or
+    MTLStoreActionStoreAndMultisampleResolve" under `MTL_DEBUG_LAYER=1` and
+    `MTL_SHADER_VALIDATION=1`. Reproduces in both the pre-shadow-map renderer and the
+    preserved shadow-map build with maps disabled; their 73 compared screenshots match
+    exactly. Not fixed as part of the rollback. Investigate resolve attachments when
+    selecting deferred store actions; do not describe this validation run as clean.

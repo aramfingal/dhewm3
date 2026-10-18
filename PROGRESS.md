@@ -205,6 +205,58 @@ The cost is shadow-volume stencil fill times the sample count; particles (477 wi
 being outside the map (the view is in area 38) are not it. Ideas if it matters: shadow
 volumes are not clipped with a depth bounds test (`GL_EXT_depth_bounds_test`, FOLLOWUPS 8).
 
+## Shadow-map experiment rolled back (2026-10-18)
+
+`metal-renderer` now uses the exact engine source from `89e386e` (`play-fixes`), before
+shadow maps were introduced. The experiment is preserved on `shadow-maps` at `16b5030`;
+no history was deleted or force-pushed. The earlier particle, post-process, shader warm-up,
+frame-pacing and game-code fixes are retained. The local `build/` binary was rebuilt.
+`r_shadowMaps` and the other shadow-map cvars no longer control this renderer; an old
+archived setting of `r_shadowMaps 1` does not enable maps.
+
+Measured on the M5 Max, 2560x1440, 8x MSAA, HD pack, hidden window, no presentation or FPS
+limit, frozen game state. Each mode has a warm-up and five 200-frame timing reports; the
+first report is discarded, and the remaining frame times are reduced to a median. Stencil
+was repeated after the other modes to check drift:
+
+| view | experiment, stencil | experiment, maps | restored stencil |
+|---|---|---|---|
+| mc_underground (-656 -2112 96), yaw 0 | 2,660 fps | 1,508 fps | 2,674 fps |
+| alphalabs1 (-148 2338 128), yaw 135 | 1,641 fps | 1,356 fps | 1,658-1,665 fps |
+| mc_underground (-908 -1328 -103), yaw 327, original hotspot | 468 fps | 1,516 fps | 468 fps |
+
+The regression has two concrete sources in the experiment:
+
+- `SM_DrawMap` / `SM_DrawCasters` in `draw_shadowmap.cpp` re-encode and draw each light's
+  shadow volumes into up to six depth layers every frame, including side and extruded
+  triangles, with a second map where noselfshadow interactions require one. Only texture
+  allocations are pooled, not shadow contents. `R_UseOptimizedShadows` also disables dmap's
+  precomputed world volumes. In the open outdoor view, with **all interaction draws
+  disabled**, maps still take 0.469 ms/frame against stencil's 0.312; backend CPU time
+  rises from 0.098 to 0.188 ms. This isolates generation overhead from shadow sampling.
+- `mgl_shadow` in `mgl_shader.cpp` adds world-position reconstruction, cube-face selection,
+  derivative normals and nine bilinear depth-comparison samples to lit fragments. In the
+  same view, replacing the nine comparisons with one (`r_shadowMapSoftness 0`) reaches only
+  1,672 fps, not stencil's 2,660. Reducing `r_shadowMapSize` from 1024 to 256 gives 1,520 fps;
+  it is not a general fix, and loses shadow resolution.
+
+These tradeoffs explain why optimizing the original stencil-fill hotspot made other views
+slower. There is no verified general fix in the experiment: persistent map caching would
+need correct invalidation for moving lights, animated/deformed casters, visibility changes,
+subviews and noselfshadow groups. Rather than ship a heuristic that moves the regression
+elsewhere, restore stencil shadows as requested. **The original 8x stencil hotspot remains
+slow**; this rollback restores the previous behavior, not a new solution to that hotspot.
+
+Verification: `python3 misc/metal-test/metal_harness.py build --src .` succeeds. Full harness
+at 1280x720, 8x MSAA, original game data (not the HD pack): 25 normal scenarios PASS on each
+of restored Metal, restored OpenGL and the preserved experiment with `r_shadowMaps 0`.
+All 73 compared screenshots are identical between restored Metal and the disabled
+experiment; none are flagged against OpenGL (largest pixel difference 0.033%). Best timedemo:
+726.4 fps restored, 714.6 experiment disabled. Report: `metal-test-out-shadow-rollback/report.md`.
+The extra Metal API/shader validation scenario is WARN in **both** binaries: deferred depth
+and stencil store-action warnings, not introduced by the rollback (FOLLOWUPS 26). No assertion
+warnings. Overall harness verdict is REVIEW, not a clean validation pass.
+
 ## Next
 
 - FOLLOWUPS.md: a visible-window test, a harness scenario for subviews and post-process
