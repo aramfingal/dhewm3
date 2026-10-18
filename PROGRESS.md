@@ -180,13 +180,20 @@ Screenshots of the two show no difference apart from animation and the fps count
 
 ## Vsync at 240 Hz (Metal, `r_metalEarlyCommit`)
 
-Outdoors (commoutside, 2560x1440, 8x, HD pack) Metal draws 1,000-1,850 fps uncapped (OpenGL
-177-327), but with vsync on the frame was committed only after `nextDrawable` returned: the
-GPU idled while the CPU waited for the display, and its time per frame doubled (5.4-6.0 ms
-against 2.6-3.2 with vsync off), more than a 240 Hz refresh (4.17 ms). Now the frame is
-committed before the wait and a second command buffer copies it to the drawable. Presented,
-vsync on, outdoors: GPU 5.4-6.0 ms per frame -> 2.45-2.66 ms. The hidden test window is shown
-at 120 Hz whatever the frame costs, so the effect at 240 Hz is not verified (FOLLOWUPS 5).
+At 2560x1440, 8x, HD pack, Metal draws 1,000-1,850 fps uncapped in the airlock at the start of
+commoutside (OpenGL 177-327) and 1,650-2,250 outdoors in mc_underground (-656 -2112 96). But
+with vsync on the frame was committed only after `nextDrawable` returned: the GPU idled while
+the CPU waited for the display, and its time per frame doubled, more than a 240 Hz refresh
+(4.17 ms). Now the frame is committed before the wait and a second command buffer copies it
+to the drawable. Presented, vsync on, GPU ms per frame:
+
+| view | `r_metalEarlyCommit 0` | `1` |
+|---|---|---|
+| commoutside airlock | 5.4-6.0 | 2.45-2.66 |
+| mc_underground outdoors | 5.3-6.4 | 2.95-3.67 |
+
+The hidden test window is shown at 120 Hz whatever the frame costs, so the effect at 240 Hz
+is not verified (FOLLOWUPS 5).
 Info.plist now has `LSApplicationCategoryType` (games), so macOS can use Game Mode.
 
 ## Next
