@@ -15,7 +15,7 @@ creates its window hidden and never becomes the active application. Screenshots 
 as in a normal run. `--foreground` shows the window (it takes keyboard focus). Every launch
 gets its own throwaway `fs_savepath`/`fs_configpath`, so your config and saves are untouched.
 
-For the multilingual GOG installer, extract into a **new** directory with its English
+For a new campaign with the multilingual GOG installer, extract into a **new** directory with its English
 language filter (the EXE and companion BIN must be together):
 
 ```sh
@@ -27,6 +27,17 @@ innoextract --language en-US --exclude-temp \
 Unfiltered extraction mixes conflicting localized archives and configs. Filtering does not
 remove files from a previous extraction. This installer supports `en-US`; use
 `innoextract --list-languages <installer.exe>` to check other releases.
+
+Existing saves can depend on the GUI definitions in their original language packs:
+GUI state is serialized against the parsed window/script layout, not independently of it.
+Changing language archives can therefore crash restore even when all core `pak` files match.
+Before changing an existing campaign's data source, load copies of its actual saves in a
+throwaway save/config path with the same mods. The normal harness creates its own saves;
+that does not establish compatibility with saves made using different assets.
+For a cross-process resave/reload check, keep sound enabled and mute it with `s_volume -60`
+rather than changing sound state with `s_noSound 1`.
+The owner's old quicksave has a separately verified migrated clone, `EnglishMigratedQuickSave`.
+That does not migrate other old slots or establish portability for arbitrary saves.
 
 ## Quick start
 

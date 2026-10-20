@@ -156,4 +156,22 @@ Each item: where, approach, risk, how to verify.
     files win. Resolved locally by extracting the GOG installer with `--language en-US`
     into a fresh `~/Projects/doom-3-english` and using it in the launcher and harness.
     The temporary English PDA override was removed; no language-specific asset workaround
-    is needed. Keep multilingual extractions out of the active data path.
+    is needed. Keep multilingual extractions out of the active data path. Existing saves
+    require separate compatibility checks or migration (item 28).
+
+## Savegame asset compatibility
+
+28. **GUI layout changes can make existing saves unloadable.** `idWindow::ReadFromSaveGame`
+    consumes state according to the current GUI's variables, scripts, events and children,
+    without storing enough layout information to reconstruct a different version. Removing
+    localized `zpak` files changes those definitions, not just translations. The owner's
+    delta3 quicksave aborts in GUI restore with clean English data and loads with the original
+    data. All core base/RoE `pak` archives are byte-identical. A cloned quicksave was migrated
+    by loading with temporary old GUI layouts, freezing time, replacing those layouts with
+    English definitions, running `reloadGuis all`, then saving to a new slot. Independent
+    English-only load/resave/reload and PDA opening pass with HD packs and sound enabled.
+    The separate `EnglishMigratedQuickSave` slot is for the owner's testing; original saves
+    are untouched and still require original GUI assets. Reload resets GUI runtime layout
+    state; arbitrary world panels and other saves have not been exhaustively verified.
+    Do not suppress the assertion, skip fields, overwrite saves, or promise save portability
+    across changed GUI assets. Test real existing saves before changing active data sources.

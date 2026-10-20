@@ -304,6 +304,45 @@ load the preserved HD packs and print the original English subjects of three ema
 each game. Both use only the new game-data path, report English, have no PDA repair archive
 or suspicious console lines, and exit normally with screenshots.
 
+## Existing-save compatibility and cloned migration (2026-10-20)
+
+The clean-data switch broke the owner's existing delta3 quicksave. The earlier menu,
+fresh-map and same-assets save/load checks were insufficient: none loaded an actual save
+created with the old localized GUI definitions. No user saves were deleted or overwritten.
+
+Reproduced with a copied `QuickSave.save`, HD packs, 8x MSAA, hidden window and throwaway
+save/config paths: clean English data aborts with exit 134 in `idWindow::ReadFromSaveGame`
+(`idList::operator[]`); original data loads, takes a screenshot and saves normally with no
+suspicious console lines. Every core `pak*.pk4` in both base and RoE is byte-identical
+between the extractions. The difference is the language packs' GUI overrides, including
+`guis/pda.gui`; GUI save state is positional and assumes the same parsed layout.
+
+An original-assets fallback with the English PDA-only archive was tested successfully,
+but the owner requested migration instead of keeping that workaround. Launcher/harness
+defaults remain English-only, and the PDA-only archive is removed.
+
+Cloned the latest actual quicksave into a throwaway save/config path with HD packs.
+Temporary loose GUI definitions from the old localization archives permit loading the
+clone against English data. With game time frozen, replaced those definitions with the
+English versions, ran `reloadGuis all`, and saved `EnglishMigratedQuickSave`. Removed the
+temporary GUI files. A first attempt synchronized on buffered stdout and failed fresh
+reload; synchronizing on a screenshot file before replacing the layouts corrected that
+race. The failed candidate was never promoted.
+
+The migrated clone loads in a separate process with English-only data and HD packs,
+without GUI compatibility files or the PDA repair archive. It saves a continuation which
+also loads in another independent process; PDA opening and screenshots pass without
+suspicious console lines. Sound is enabled but muted (`s_noSound 0`, `s_volume -60`).
+A preliminary resave with sound disabled hit a separate sound-amplitude crash on reload;
+that diagnostic artifact was not promoted. No assertion was disabled and no save stream
+was skipped or rewritten.
+
+The new named slot is kept separately for the owner's testing. Original quicksave and
+autosave files and both game-data directories remain unchanged; HD packs are untouched.
+Use `./play.sh +loadGame EnglishMigratedQuickSave`; old quickload slots are not migrated.
+GUI reload rebuilds runtime layout state, so this is not exhaustive validation of every
+interactive world panel or a general migration of other old save slots.
+
 ## Next
 
 - FOLLOWUPS.md: a visible-window test, a harness scenario for subviews and post-process

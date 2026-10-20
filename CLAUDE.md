@@ -15,6 +15,8 @@ matches it. Work happens on the `metal-renderer` branch.
   `innoextract --language en-US --exclude-temp`. Treat it as read-only: point the game at it
   with `+set fs_basepath`, never modify it. The original `~/Projects/doom-3-extracted` is
   an untouched backup with mixed-language overrides; do not use it by default.
+  Old saves depend on those GUI layouts; test clones before changing assets. The migrated
+  `EnglishMigratedQuickSave` slot works with English data; original saves remain unchanged.
 - Test runs must not take over the Mac. The harness sets `SDL_MAC_BACKGROUND_APP=1`, which
   makes the game create its window hidden and never become the active application (see
   `neo/sys/osx/SDLMain.m`, `neo/sys/glimp.cpp`). Launch the game by hand the same way.
