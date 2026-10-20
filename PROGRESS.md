@@ -257,7 +257,7 @@ The extra Metal API/shader validation scenario is WARN in **both** binaries: def
 and stencil store-action warnings, not introduced by the rollback (FOLLOWUPS 26). No assertion
 warnings. Overall harness verdict is REVIEW, not a clean validation pass.
 
-## English PDA text with localized retail data (2026-10-20)
+## English PDA text with localized retail data (2026-10-20; temporary repair superseded)
 
 The local retail data contains Spanish PDA definitions in `base/zpak000.pk4` and Italian
 ones in `base/zpak001.pk4`; the latter wins over both Spanish and the English originals in
@@ -276,6 +276,33 @@ afterwards the game printed the original English subjects for all three, `sys_la
 English, and the run exited normally with a screenshot and no suspicious console lines.
 The installed archive passes ZIP integrity checks and every entry matches its original
 bytes. Restart the game for the new archive to be loaded.
+
+## Clean English-only installation (2026-10-20)
+
+Replaced the active mixed-language data source with a fresh GOG extraction:
+
+```sh
+innoextract --language en-US --exclude-temp \
+  --output-dir "$HOME/Projects/doom-3-english" \
+  "$HOME/Downloads/setup_doom_3_1.3.1_(62814).exe"
+```
+
+Extraction succeeded; GOG metadata now identifies English / `en-US`. Neither `base` nor
+`d3xp` contains foreign `zpak` archives or loose translated `default.cfg` files. Original
+PDA declarations are present in both games (68 base, 24 RoE). `play.sh` and the harness
+default now use this clean directory.
+
+Removed the temporary save-path `zzzz_english_pdas.pk4` override. HD texture packs, saves
+and settings remain in the usual save path, unchanged. The old `doom-3-extracted` directory
+is retained as an untouched backup, not used by default. No renderer or game-code changes
+are needed for language selection.
+
+Verified: shell syntax and harness Python compilation pass. Targeted 8x MSAA harness:
+menu, alphalabs1 views, RoE erebus1 views and base mounted-flashlight scenario all PASS
+(`metal-test-out-clean-english/report.md`). Separate hidden launches through `play.sh`
+load the preserved HD packs and print the original English subjects of three emails in
+each game. Both use only the new game-data path, report English, have no PDA repair archive
+or suspicious console lines, and exit normally with screenshots.
 
 ## Next
 

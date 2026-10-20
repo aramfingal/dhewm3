@@ -36,7 +36,7 @@ try:
 except ImportError:  # pragma: no cover
     np = None
 
-DEFAULT_DATA = os.path.expanduser("~/Projects/doom-3-extracted")
+DEFAULT_DATA = os.path.expanduser("~/Projects/doom-3-english")
 DEFAULT_RES = (1280, 720)
 SCENARIO_TIMEOUT = 300
 EXE_NAME = "dhewm3"

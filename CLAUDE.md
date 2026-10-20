@@ -11,9 +11,10 @@ matches it. Work happens on the `metal-renderer` branch.
 - `origin` is `aramfingal/dhewm3`. `upstream` (`dhewm/dhewm3`) is for fetching only and its
   push URL is disabled (`git remote set-url --push upstream DISABLED-never-push-to-upstream`).
   Never open a pull request or issue against `dhewm/dhewm3`, and never push to it.
-- Game data is in `~/Projects/doom-3-extracted` (`base/`, `d3xp/`). Treat it as read-only:
-  point the game at it with `+set fs_basepath`, never modify it. Its `default.cfg` sets
-  `sys_lang spanish`; the harness passes `+set sys_lang english`.
+- Active game data is in `~/Projects/doom-3-english` (`base/`, `d3xp/`), extracted with
+  `innoextract --language en-US --exclude-temp`. Treat it as read-only: point the game at it
+  with `+set fs_basepath`, never modify it. The original `~/Projects/doom-3-extracted` is
+  an untouched backup with mixed-language overrides; do not use it by default.
 - Test runs must not take over the Mac. The harness sets `SDL_MAC_BACKGROUND_APP=1`, which
   makes the game create its window hidden and never become the active application (see
   `neo/sys/osx/SDLMain.m`, `neo/sys/glimp.cpp`). Launch the game by hand the same way.
@@ -38,7 +39,7 @@ By hand: `cmake -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo
 -DOPENAL_LIBRARY=/opt/homebrew/opt/openal-soft/lib/libopenal.dylib ../neo && ninja` in `build/`.
 The binary is `build/dhewm3.app/Contents/MacOS/dhewm3`; `base.dylib` and `d3xp.dylib` (game
 code) are in `build/`. Run it with
-`+set fs_basepath ~/Projects/doom-3-extracted +set fs_savepath <throwaway dir> +set fs_configpath <same>`.
+`+set fs_basepath ~/Projects/doom-3-english +set fs_savepath <throwaway dir> +set fs_configpath <same>`.
 
 `misc/metal-test/README.md` describes the scenarios, the output layout and the fix loop.
 

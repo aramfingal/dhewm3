@@ -7,13 +7,26 @@ numbers, crash reports and a `report.md` with a verdict. It is adapted from the 
 harness. The loop is: build, run the harness, read the report, fix, repeat.
 
 Requirements: macOS, Python 3.9+, CMake + Ninja, `brew install sdl2-compat openal-soft`, and
-the retail game data (`base/pak000.pk4`…, optionally `d3xp/`) in `~/Projects/doom-3-extracted`
+the retail game data (`base/pak000.pk4`…, optionally `d3xp/`) in `~/Projects/doom-3-english`
 or wherever `--data` points. The data is only read. numpy is optional (faster image diffs).
 
 Runs stay in the background: the harness sets `SDL_MAC_BACKGROUND_APP=1`, and the game then
 creates its window hidden and never becomes the active application. Screenshots are the same
 as in a normal run. `--foreground` shows the window (it takes keyboard focus). Every launch
 gets its own throwaway `fs_savepath`/`fs_configpath`, so your config and saves are untouched.
+
+For the multilingual GOG installer, extract into a **new** directory with its English
+language filter (the EXE and companion BIN must be together):
+
+```sh
+innoextract --language en-US --exclude-temp \
+  --output-dir "$HOME/Projects/doom-3-english" \
+  "$HOME/Downloads/setup_doom_3_1.3.1_(62814).exe"
+```
+
+Unfiltered extraction mixes conflicting localized archives and configs. Filtering does not
+remove files from a previous extraction. This installer supports `en-US`; use
+`innoextract --list-languages <installer.exe>` to check other releases.
 
 ## Quick start
 
