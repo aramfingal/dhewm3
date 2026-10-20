@@ -257,6 +257,26 @@ The extra Metal API/shader validation scenario is WARN in **both** binaries: def
 and stencil store-action warnings, not introduced by the rollback (FOLLOWUPS 26). No assertion
 warnings. Overall harness verdict is REVIEW, not a clean validation pass.
 
+## English PDA text with localized retail data (2026-10-20)
+
+The local retail data contains Spanish PDA definitions in `base/zpak000.pk4` and Italian
+ones in `base/zpak001.pk4`; the latter wins over both Spanish and the English originals in
+`pak000.pk4`. Email bodies/subjects are literal declaration text, not language-dictionary
+entries, so `sys_lang english` alone cannot select their language.
+
+Installed a local `~/Library/Application Support/dhewm3/base/zzzz_english_pdas.pk4` containing
+the 68 unchanged English `newpdas/*.pda` files from the owner's `pak000.pk4`. The game data
+remains read-only; no copyrighted assets are added to this repository. This override covers
+PDA definitions, not translated audio. `play.sh` now explicitly sets `sys_lang english` as
+the harness already does; later command-line arguments can still override it.
+
+Verified using the actual launcher, hidden window, throwaway save/config paths: before the
+fix, three emails from marscity2, alphalabs1 and admin all loaded non-English subjects;
+afterwards the game printed the original English subjects for all three, `sys_lang` was
+English, and the run exited normally with a screenshot and no suspicious console lines.
+The installed archive passes ZIP integrity checks and every entry matches its original
+bytes. Restart the game for the new archive to be loaded.
+
 ## Next
 
 - FOLLOWUPS.md: a visible-window test, a harness scenario for subviews and post-process

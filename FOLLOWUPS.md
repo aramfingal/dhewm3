@@ -148,3 +148,11 @@ Each item: where, approach, risk, how to verify.
     preserved shadow-map build with maps disabled; their 73 compared screenshots match
     exactly. Not fixed as part of the rollback. Investigate resolve attachments when
     selecting deferred store actions; do not describe this validation run as clean.
+
+## Localized game data
+
+27. **`sys_lang` does not select the language of literal PDA definitions.** The owner's
+    retail data includes Spanish and Italian `zpak` overrides; the Italian PDA files win.
+    A local English-only PDA override is installed in the save path (PROGRESS.md), without
+    modifying the retail archives. It is not part of the repository and is not needed by
+    English-only installations. Translated audio in the retail packs is unchanged.
